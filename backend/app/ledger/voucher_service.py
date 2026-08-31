@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.ledger.exceptions import BookError, VoucherError
 from app.models.account import Account
 from app.models.book import Book
+from app.models.report import PeriodClose
 from app.models.user import User
 from app.models.voucher import Voucher, VoucherLine
 
@@ -52,6 +53,16 @@ def _next_voucher_no(db: Session, book_id: int, period: str) -> int:
         )
     )
     return (current or 0) + 1
+
+
+def _ensure_period_open(db: Session, book_id: int, period: str) -> None:
+    closed = db.scalar(
+        select(PeriodClose.id).where(
+            PeriodClose.book_id == book_id, PeriodClose.period == period
+        )
+    )
+    if closed is not None:
+        raise VoucherError(f"期间 {period} 已结账，请先反结账后再操作")
 
 
 def _validate_lines(
@@ -122,6 +133,7 @@ def create_voucher(
     period = f"{voucher_date:%Y-%m}"
     if period < book.start_period:
         raise VoucherError(f"凭证期间早于账套启用期间 {book.start_period}")
+    _ensure_period_open(db, book_id, period)
     if source in ("manual", "ai") and attachment_count < 1:
         raise VoucherError("凭证必须至少附一张原始凭证")
     prepared, total = _validate_lines(db, book_id, lines, strict_accounts=strict_accounts)
@@ -176,6 +188,7 @@ def update_voucher(
         new_date = _ensure_date(voucher_date)
         new_period = f"{new_date:%Y-%m}"
         if new_period != voucher.period:
+            _ensure_period_open(db, voucher.book_id, new_period)
             new_no = _next_voucher_no(db, voucher.book_id, new_period)
             voucher.voucher_date = new_date
             voucher.period = new_period
@@ -261,6 +274,7 @@ def unpost_voucher(db: Session, *, voucher_id: int) -> Voucher:
         raise VoucherError("只有已过账凭证可以反过账")
     if voucher.voided_by_voucher_id:
         raise VoucherError("凭证已被冲销，不能反过账")
+    _ensure_period_open(db, voucher.book_id, voucher.period)
     voucher.status = "audited"
     voucher.posted_by = None
     voucher.posted_at = None
@@ -275,6 +289,7 @@ def reverse_voucher(db: Session, *, voucher_id: int, operator: User) -> Voucher:
         raise VoucherError("只有已过账凭证可以红字冲销")
     if voucher.voided_by_voucher_id:
         raise VoucherError("凭证已被冲销，不能重复冲销")
+    _ensure_period_open(db, voucher.book_id, voucher.period)
     prefix = f"冲销{voucher.word}字第{voucher.voucher_no:04d}号："
     lines = [
         {

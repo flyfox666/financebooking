@@ -130,6 +130,18 @@ def mock_month(db_session, book, mama_user, auditor_user, post_flow):
 
 
 @pytest.fixture()
+def mock_month_with_carryover(db_session, mock_month, book, mama_user, auditor_user, post_flow):
+    from app.ledger import close_service
+
+    drafts = close_service.generate_carryover(
+        db_session, book_id=book.id, period="2026-08", operator_id=mama_user.id
+    )
+    for draft in drafts:
+        post_flow(draft, mama_user, auditor_user)
+    return {"vouchers": mock_month, "carryovers": drafts}
+
+
+@pytest.fixture()
 def get_posted_nets(db_session):
     def _run(book_id: int) -> dict[str, Decimal]:
         rows = db_session.execute(

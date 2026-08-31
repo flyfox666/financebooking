@@ -9,6 +9,7 @@ from app.models.book import Book
 from app.models.user import User
 from app.schemas.account import AccountCreate, AccountNode, AccountOut, AccountPatch
 from app.schemas.book import BookCreate, BookOut
+from app.schemas.report import OpeningSetIn
 
 router = APIRouter(prefix="/api", tags=["books"])
 
@@ -43,6 +44,21 @@ def get_book(
     if book is None:
         raise HTTPException(status_code=404, detail="账套不存在")
     return book
+
+
+@router.put("/books/{book_id}/opening")
+def set_opening(
+    book_id: int,
+    body: OpeningSetIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    try:
+        return book_service.set_opening_balances(
+            db, book_id=book_id, items=[item.model_dump() for item in body.items]
+        )
+    except LedgerError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/accounts", response_model=list[AccountNode])

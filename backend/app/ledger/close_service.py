@@ -1,39 +1,75 @@
-import calendar
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.ledger import voucher_service
+from app.ledger.balances import gross_sums, trial_balance
 from app.ledger.exceptions import VoucherError
 from app.models.account import Account
-from app.models.voucher import Voucher, VoucherLine
+from app.models.report import PeriodBalance, PeriodClose
+from app.models.voucher import Voucher
 
+UNPOSTED_STATUSES = ("draft", "submitted", "audited")
 RD_PARENT = "4301"
 RD_EXPENSE_NAME_KEYWORD = "费用化"
 RD_TARGET_PARENT = "5602"
 RD_TARGET_NAME_KEYWORD = "研究费用"
 PROFIT_CODE = "3103"
 
-POSTED_STATUSES = ("posted", "voided")
+
+def is_period_closed(db: Session, book_id: int, period: str) -> bool:
+    found = db.scalar(
+        select(PeriodClose.id).where(
+            PeriodClose.book_id == book_id, PeriodClose.period == period
+        )
+    )
+    return found is not None
 
 
-def _posted_sums(db: Session, book_id: int, period: str) -> dict[str, list[Decimal]]:
-    rows = db.execute(
-        select(VoucherLine.account_code, VoucherLine.debit, VoucherLine.credit)
-        .join(Voucher, VoucherLine.voucher_id == Voucher.id)
+def close_period(db: Session, *, book_id: int, period: str, operator_id: int) -> dict:
+    if is_period_closed(db, book_id, period):
+        raise VoucherError("该期间已结账")
+    unposted = db.scalar(
+        select(func.count())
+        .select_from(Voucher)
         .where(
             Voucher.book_id == book_id,
             Voucher.period == period,
-            Voucher.status.in_(POSTED_STATUSES),
+            Voucher.status.in_(UNPOSTED_STATUSES),
         )
-    ).all()
-    sums: dict[str, list[Decimal]] = {}
-    for code, debit, credit in rows:
-        d, c = sums.get(code, [Decimal("0"), Decimal("0")])
-        sums[code] = [d + Decimal(str(debit)), c + Decimal(str(credit))]
-    return sums
+    )
+    if unposted:
+        raise VoucherError(f"该期间还有 {unposted} 张未过账凭证，不能结账")
+    report = trial_balance(db, book_id=book_id, period=period)
+    for row in report["rows"]:
+        db.add(
+            PeriodBalance(
+                book_id=book_id,
+                account_code=row["account_code"],
+                period=period,
+                opening_debit=Decimal(row["opening_debit"]),
+                opening_credit=Decimal(row["opening_credit"]),
+                period_debit=Decimal(row["period_debit"]),
+                period_credit=Decimal(row["period_credit"]),
+                closing_debit=Decimal(row["closing_debit"]),
+                closing_credit=Decimal(row["closing_credit"]),
+            )
+        )
+    db.add(PeriodClose(book_id=book_id, period=period, closed_by=operator_id, closed_at=datetime.now()))
+    db.commit()
+    return {"period": period, "closed": True, "snapshot_accounts": len(report["rows"])}
+
+
+def unclose_period(db: Session, *, book_id: int, period: str) -> None:
+    if not is_period_closed(db, book_id, period):
+        raise VoucherError("该期间未结账")
+    db.execute(delete(PeriodClose).where(PeriodClose.book_id == book_id, PeriodClose.period == period))
+    db.execute(
+        delete(PeriodBalance).where(PeriodBalance.book_id == book_id, PeriodBalance.period == period)
+    )
+    db.commit()
 
 
 def _find_rd_accounts(db: Session, book_id: int):
@@ -66,7 +102,13 @@ def _carryover_exists(db: Session, book_id: int, period: str, carryover_type: st
 
 def _period_end_date(period: str) -> date:
     year, month = int(period[:4]), int(period[5:7])
-    return date(year, month, calendar.monthrange(year, month)[1])
+    return date(year, month, calendar_month_end(year, month))
+
+
+def calendar_month_end(year: int, month: int) -> int:
+    import calendar
+
+    return calendar.monthrange(year, month)[1]
 
 
 def _line(summary: str, account_code: str, *, debit: Decimal = Decimal("0"), credit: Decimal = Decimal("0")) -> dict:
@@ -75,14 +117,14 @@ def _line(summary: str, account_code: str, *, debit: Decimal = Decimal("0"), cre
 
 def generate_carryover(db: Session, *, book_id: int, period: str, operator_id: int) -> list[Voucher]:
     created: list[Voucher] = []
-    sums = _posted_sums(db, book_id, period)
+    sums = gross_sums(db, book_id, period, period)
 
     rd_lines: list[dict] = []
     rd_net = Decimal("0")
     rd_expense, rd_target = _find_rd_accounts(db, book_id)
     if rd_expense is not None:
-        d, c = sums.get(rd_expense.code, [Decimal("0"), Decimal("0")])
-        rd_net = d - c
+        debit, credit = sums.get(rd_expense.code, [Decimal("0"), Decimal("0")])
+        rd_net = debit - credit
         if rd_net != 0:
             if rd_target is None:
                 raise VoucherError("管理费用下未找到“研究费用”明细科目，请先增设后再结转研发支出")
@@ -135,10 +177,10 @@ def generate_carryover(db: Session, *, book_id: int, period: str, operator_id: i
     debit_lines: list[dict] = []
     credit_lines: list[dict] = []
     for account in pnl_accounts:
-        d, c = sums.get(account.code, [Decimal("0"), Decimal("0")])
-        if d == 0 and c == 0:
+        debit, credit = sums.get(account.code, [Decimal("0"), Decimal("0")])
+        if debit == 0 and credit == 0:
             continue
-        normal = (d - c) * account.direction
+        normal = (debit - credit) * account.direction
         if normal == 0:
             continue
         amount = abs(normal)

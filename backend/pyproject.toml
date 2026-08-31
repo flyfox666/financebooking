@@ -1,7 +1,7 @@
 [project]
 name = "ledgerai-backend"
 version = "0.1.0"
-description = "AI 财务记账与总账系统后端（阶段 A · M1）"
+description = "AI 财务记账与总账系统后端（阶段 A · M3）"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.115",
@@ -12,6 +12,7 @@ dependencies = [
     "python-jose[cryptography]>=3.3",
     "bcrypt>=4.0",
     "httpx>=0.27",
+    "openpyxl>=3.1",
 ]
 
 [project.optional-dependencies]
