@@ -8,8 +8,9 @@ from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import attachments, auth, books, invoices, periods, reports, system, tax, users, vouchers
+from app.api import attachments, auth, books, invoices, llm, periods, reports, system, tax, users, vouchers
 from app.core.backup import run_backup_now
+from app.core.database import SessionLocal
 
 BACKUP_HOUR = 3
 
@@ -19,6 +20,13 @@ def run_migrations() -> None:
     cfg = Config(str(backend_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(backend_root / "alembic"))
     command.upgrade(cfg, "head")
+
+
+def seed_llm_provider() -> None:
+    from app.ledger.llm.gateway import seed_from_env
+
+    with SessionLocal() as db:
+        seed_from_env(db)
 
 
 async def backup_scheduler():
@@ -37,6 +45,7 @@ async def backup_scheduler():
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     run_migrations()
+    seed_llm_provider()
     task = asyncio.create_task(backup_scheduler())
     yield
     task.cancel()
@@ -62,3 +71,4 @@ app.include_router(reports.router)
 app.include_router(attachments.router)
 app.include_router(invoices.router)
 app.include_router(tax.router)
+app.include_router(llm.router)

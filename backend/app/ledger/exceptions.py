@@ -12,3 +12,7 @@ class AccountError(LedgerError):
 
 class VoucherError(LedgerError):
     pass
+
+
+class LLMError(LedgerError):
+    pass
