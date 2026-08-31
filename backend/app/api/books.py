@@ -46,6 +46,29 @@ def get_book(
     return book
 
 
+@router.get("/books/{book_id}/opening")
+def get_opening(
+    book_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    from sqlalchemy import select
+
+    from app.models.report import OpeningBalance
+
+    rows = db.scalars(
+        select(OpeningBalance).where(OpeningBalance.book_id == book_id).order_by(OpeningBalance.id)
+    ).all()
+    return [
+        {
+            "account_code": row.account_code,
+            "debit": str(row.debit),
+            "credit": str(row.credit),
+        }
+        for row in rows
+    ]
+
+
 @router.put("/books/{book_id}/opening")
 def set_opening(
     book_id: int,

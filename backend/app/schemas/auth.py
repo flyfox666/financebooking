@@ -18,6 +18,7 @@ class UserOut(BaseModel):
     username: str
     display_name: str
     role: str
+    is_active: bool
 
     model_config = {"from_attributes": True}
 
@@ -27,3 +28,10 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=6, max_length=64)
     display_name: str = ""
     role: Literal["admin", "bookkeeper", "auditor"] = "bookkeeper"
+
+
+class UserPatch(BaseModel):
+    display_name: str | None = None
+    role: Literal["admin", "bookkeeper", "auditor"] | None = None
+    password: str | None = Field(default=None, min_length=6, max_length=64)
+    is_active: bool | None = None

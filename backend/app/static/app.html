@@ -171,7 +171,7 @@ function switchView(view) {
   document.querySelectorAll('#sideNav div').forEach(el => el.classList.toggle('active', el.dataset.view === view));
   const main = $('mainArea');
   if (view === 'llm') { window.open('/settings', '_blank'); return; }
-  ({ chat: renderChat, vouchers: renderVouchers, tb: renderTB, is: renderIS, bs: renderBS, cf: renderCF, invoices: renderInvoices, tax: renderTax })[view]();
+  ({ chat: renderChat, vouchers: renderVouchers, tb: renderTB, reports: renderReports, opening: renderOpening, invoices: renderInvoices, tax: renderTax, users: renderUsers })[view]();
 }
 
 function addBubble(html, cls = 'ai') {
@@ -350,21 +350,91 @@ async function confirmCard(mode) {
 }
 
 /* ---------- 模块视图 ---------- */
+/* ---------- 凭证模块（列表 + 详情查看/编辑） ---------- */
+let VE = null;
+
+function accountOptions(selected) {
+  return ACCOUNTS.filter(a => a.is_active && a.is_leaf).map(a =>
+    `<option value="${a.code}" ${a.code === selected ? 'selected' : ''}>${a.code} ${a.name}</option>`).join('');
+}
+
 async function renderVouchers() {
   $('mainArea').innerHTML = `<h3 class="view-title">📋 凭证（${PERIOD}）
     <select id="v_status" onchange="renderVouchers()" style="margin-left:.8rem">
       <option value="">全部状态</option>${['draft', 'submitted', 'audited', 'posted', 'voided'].map(s => `<option value="${s}">${s}</option>`).join('')}
-    </select></h3><div id="v_list">加载中…</div>`;
+    </select>
+    <button class="ghost small" style="margin-left:.8rem" onclick="newManualCard()">＋ 新建凭证</button></h3><div id="v_list">加载中…</div>`;
   const status = $('v_status').value;
   const list = await api(`/api/vouchers?book_id=${BOOK.id}&period=${PERIOD}${status ? '&status=' + status : ''}`);
   $('v_list').innerHTML = list.length ? `<table><tr><th>凭证号</th><th>日期</th><th>状态</th><th>来源</th><th>金额</th><th>操作</th></tr>` +
-    list.map(v => `<tr><td>${v.voucher_no_display}</td><td>${v.voucher_date}</td><td>${v.status}</td><td>${v.source}</td><td class="num">${v.total_debit}</td>
-      <td>${ROLE !== 'bookkeeper' && v.status === 'submitted' ? `<button class="small" onclick="act('${v.id}','audit')">审核</button>
-      <button class="small ghost" onclick="act('${v.id}','reject')">驳回</button>` : ''}
-      ${ROLE !== 'bookkeeper' && v.status === 'audited' ? `<button class="small" onclick="act('${v.id}','post')">过账</button>` : ''}
-      ${ROLE !== 'bookkeeper' && v.status === 'posted' ? `<button class="small ghost" onclick="act('${v.id}','unpost')">反过账</button>` : ''}</td></tr>`).join('') + '</table>'
+    list.map(v => `<tr><td><a href="javascript:void(0)" style="color:var(--accent);text-decoration:underline" onclick="viewVoucher(${v.id})">${v.voucher_no_display}</a></td>
+      <td>${v.voucher_date}</td><td>${{draft:'草稿',submitted:'待审核',audited:'已审核',posted:'已过账',voided:'已冲销'}[v.status] || v.status}</td>
+      <td>${v.source}</td><td class="num">${v.total_debit}</td>
+      <td><button class="small ghost" onclick="viewVoucher(${v.id})">查看${v.status === 'draft' ? '/编辑' : ''}</button></td></tr>`).join('') + '</table>'
     : '<div class="result">本期暂无凭证</div>';
 }
+
+async function viewVoucher(id) {
+  const v = await api(`/api/vouchers/${id}`);
+  const editable = v.status === 'draft';
+  VE = { id, voucher: JSON.parse(JSON.stringify(v)), editable };
+  renderVoucherDetail();
+}
+
+function renderVoucherDetail() {
+  const v = VE.voucher;
+  const linesHtml = v.lines.map((line, i) => VE.editable ? `
+    <div class="vc-line">
+      <input value="${line.summary}" placeholder="摘要" onchange="veUpd(${i},'summary',this.value)">
+      <select onchange="veUpd(${i},'account_code',this.value)">
+        <option value="">选择科目</option>${accountOptions(line.account_code)}
+      </select>
+      <input class="num" value="${line.debit}" placeholder="借方" onchange="veUpd(${i},'debit',this.value)">
+      <input class="num" value="${line.credit}" placeholder="贷方" onchange="veUpd(${i},'credit',this.value)">
+      <button class="small danger" onclick="veDel(${i})">×</button>
+    </div>` : `
+    <tr><td>${line.summary}</td><td>${line.account_code}</td><td class="num">${line.debit}</td><td class="num">${line.credit}</td></tr>`).join('');
+  const diff = (v.lines.reduce((acc, l) => acc + (parseFloat(l.debit) || 0) - (parseFloat(l.credit) || 0), 0)).toFixed(2);
+  $('mainArea').innerHTML = `
+    <h3 class="view-title"><a href="javascript:void(0)" style="color:var(--accent)" onclick="switchView('vouchers')">← 凭证列表</a>
+      ｜ ${v.voucher_no_display} <span class="badge">${{draft:'草稿',submitted:'待审核',audited:'已审核',posted:'已过账',voided:'已冲销'}[v.status] || v.status}</span>
+      <span class="badge gray">${{manual:'手工',ai:'AI生成',carryover:'结转',reverse:'红冲'}[v.source] || v.source}</span></h3>
+    <div class="card">
+      <div style="margin-bottom:.5rem">凭证日期 <b>${v.voucher_date}</b> ｜ 附单据数 <b>${v.attachment_count}</b> ｜ 期间 ${v.period}</div>
+      ${VE.editable ? `
+        <div class="vc-line" style="font-weight:700;color:var(--muted)"><span>摘要</span><span>科目</span><span style="text-align:right">借方</span><span style="text-align:right">贷方</span><span></span></div>
+        ${linesHtml}
+        <button class="small ghost" onclick="veAdd()">＋ 加一行</button>
+        <div class="vc-totals"><span class="${Math.abs(diff) < 0.005 ? 'diff-ok' : 'diff-bad'}">差额 ${diff}</span></div>
+        <div id="ve_err" style="color:var(--danger);font-size:.82rem"></div>
+        <button onclick="veSave()" ${Math.abs(diff) >= 0.005 ? 'disabled' : ''}>保存修改</button>
+        <button class="ghost" onclick="veSubmit()">提交审核</button>
+        <button class="danger" onclick="veDelete()">删除凭证</button>`
+      : `<table><tr><th>摘要</th><th>科目</th><th class="num">借方</th><th class="num">贷方</th></tr>${linesHtml}</table>
+        <div class="vc-totals"><span>借方合计 ${v.total_debit}</span><span>贷方合计 ${v.total_credit}</span></div>
+        ${ROLE !== 'bookkeeper' && v.status === 'submitted' ? `<button onclick="act('${v.id}','audit')">审核通过</button> <button class="ghost" onclick="act('${v.id}','reject')">驳回</button>` : ''}
+        ${ROLE !== 'bookkeeper' && v.status === 'audited' ? `<button onclick="act('${v.id}','post')">过账</button>` : ''}
+        ${ROLE !== 'bookkeeper' && v.status === 'posted' ? `<button class="ghost" onclick="act('${v.id}','unpost')">反过账</button> <button class="danger" onclick="veReverse()">红字冲销</button>` : ''}`}
+    </div>`;
+}
+
+function veUpd(i, field, value) { VE.voucher.lines[i][field] = value; }
+function veAdd() { VE.voucher.lines.push({ summary: '', account_code: '', debit: '0', credit: '0' }); renderVoucherDetail(); }
+function veDel(i) { VE.voucher.lines.splice(i, 1); renderVoucherDetail(); }
+
+async function veSave() {
+  try {
+    VE.voucher = await api(`/api/vouchers/${VE.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ lines: VE.voucher.lines }),
+    });
+    renderVoucherDetail();
+  } catch (e) { $('ve_err').textContent = '保存失败：' + e.message; }
+}
+
+async function veSubmit() { try { await api(`/api/vouchers/${VE.id}/submit`, { method: 'POST' }); renderVouchers(); } catch (e) { alert('提交失败：' + e.message); } }
+async function veDelete() { if (!confirm('确定删除该草稿凭证？')) return; try { await api(`/api/vouchers/${VE.id}`, { method: 'DELETE' }); renderVouchers(); } catch (e) { alert('删除失败：' + e.message); } }
+async function veReverse() { if (!confirm('确定生成红字冲销凭证？')) return; try { await api(`/api/vouchers/${VE.id}/reverse`, { method: 'POST' }); renderVouchers(); } catch (e) { alert('冲销失败：' + e.message); } }
 
 async function act(id, action) {
   try { await api(`/api/vouchers/${id}/${action}`, { method: 'POST' }); renderVouchers(); loadSummary(); }
@@ -381,27 +451,40 @@ async function renderTB() {
     `<tr class="total-row"><td>合计</td><td class="num">${r.totals.opening_debit}</td><td class="num">${r.totals.opening_credit}</td><td class="num">${r.totals.period_debit}</td><td class="num">${r.totals.period_credit}</td><td class="num">${r.totals.closing_debit}</td><td class="num">${r.totals.closing_credit}</td></tr></table>`;
 }
 
-async function renderIS() {
-  $('mainArea').innerHTML = `<h3 class="view-title">📈 利润表（${PERIOD}）</h3><div id="t_body">加载中…</div>`;
-  const r = await api(`/api/reports/income-statement?book_id=${BOOK.id}&period=${PERIOD}`);
-  $('t_body').innerHTML = `<table><tr><th>项目</th><th class="num">本月</th><th class="num">本年累计</th></tr>` +
-    r.rows.map(row => `<tr class="${row.bold ? 'total-row' : ''}"><td>${row.name}</td><td class="num">${row.month}</td><td class="num">${row.year_to_date}</td></tr>`).join('') + '</table>';
+let reportTab = 'bs';
+
+function renderReports() {
+  $('mainArea').innerHTML = `<h3 class="view-title">📑 报表模块（${PERIOD}）</h3>
+    <div class="chips" id="r_tabs"></div><div id="t_body">加载中…</div>`;
+  [['bs', '资产负债表'], ['is', '利润表'], ['cf', '现金流量表']].forEach(([key, label]) => {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = label;
+    if (reportTab === key) chip.style.cssText = 'border-color:var(--accent);color:var(--accent);font-weight:700';
+    chip.onclick = () => { reportTab = key; renderReports(); };
+    $('r_tabs').appendChild(chip);
+  });
+  loadReport(reportTab);
 }
 
-async function renderBS() {
-  $('mainArea').innerHTML = `<h3 class="view-title">📉 资产负债表（${PERIOD}）</h3><div id="t_body">加载中…</div>`;
-  const r = await api(`/api/reports/balance-sheet?book_id=${BOOK.id}&period=${PERIOD}`);
-  $('t_body').innerHTML = `<div class="badge">${r.total_assets === r.total_liabilities_and_equity ? '✅ 资产 = 负债 + 权益' : '❌ 不平衡'}</div>
-    <table><tr><th>项目</th><th class="num">期末余额</th><th class="num">年初余额</th></tr>` +
-    r.rows.map(row => `<tr class="${row.bold ? 'total-row' : ''}"><td>${row.name}</td><td class="num">${row.closing}</td><td class="num">${row.year_begin}</td></tr>`).join('') + '</table>';
-}
-
-async function renderCF() {
-  $('mainArea').innerHTML = `<h3 class="view-title">🪙 现金流量表（${PERIOD}）</h3><div id="t_body">加载中…</div>`;
-  const r = await api(`/api/reports/cash-flow?book_id=${BOOK.id}&period=${PERIOD}`);
-  $('t_body').innerHTML = `<table><tr><th>项目</th><th class="num">本月金额</th><th class="num">本年累计</th></tr>` +
-    r.rows.map(row => `<tr class="${row.bold ? 'total-row' : ''}"><td>${row.name}</td><td class="num">${row.month}</td><td class="num">${row.year_to_date}</td></tr>`).join('') + '</table>' +
-    `<div class="result" style="margin-top:.5rem">口径：直接法；现金内部划转（如提现）已剔除；净增加额与现金类科目变动自动对账。</div>`;
+async function loadReport(kind) {
+  try {
+    if (kind === 'bs') {
+      const r = await api(`/api/reports/balance-sheet?book_id=${BOOK.id}&period=${PERIOD}`);
+      $('t_body').innerHTML = `<div class="badge">${r.total_assets === r.total_liabilities_and_equity ? '✅ 资产 = 负债 + 权益' : '❌ 不平衡'}</div>
+        <table><tr><th>项目</th><th class="num">期末余额</th><th class="num">年初余额</th></tr>` +
+        r.rows.map(row => `<tr class="${row.bold ? 'total-row' : ''}"><td>${row.name}</td><td class="num">${row.closing}</td><td class="num">${row.year_begin}</td></tr>`).join('') + '</table>';
+    } else if (kind === 'is') {
+      const r = await api(`/api/reports/income-statement?book_id=${BOOK.id}&period=${PERIOD}`);
+      $('t_body').innerHTML = `<table><tr><th>项目</th><th class="num">本月金额</th><th class="num">本年累计金额</th></tr>` +
+        r.rows.map(row => `<tr class="${row.bold ? 'total-row' : ''}"><td>${row.name}</td><td class="num">${row.month}</td><td class="num">${row.year_to_date}</td></tr>`).join('') + '</table>';
+    } else {
+      const r = await api(`/api/reports/cash-flow?book_id=${BOOK.id}&period=${PERIOD}`);
+      $('t_body').innerHTML = `<table><tr><th>项目</th><th class="num">本月金额</th><th class="num">本年累计金额</th></tr>` +
+        r.rows.map(row => `<tr class="${row.bold ? 'total-row' : ''}"><td>${row.name}</td><td class="num">${row.month}</td><td class="num">${row.year_to_date}</td></tr>`).join('') + '</table>' +
+        `<div class="result" style="margin-top:.5rem">口径：直接法；现金内部划转（如提现）已剔除；净增加额与现金类科目变动自动对账。</div>`;
+    }
+  } catch (e) { $('t_body').innerHTML = `<div class="result" style="color:var(--danger)">加载失败：${e.message}</div>`; }
 }
 
 async function renderInvoices() {
@@ -428,6 +511,114 @@ async function renderTax() {
       <div class="kv">累计利润 ${cit.profit_ytd} ｜ ${cit.actual_rate} ｜ 本期应预缴 <b>${cit.prepaid_this}</b></div></div>
     <div class="card"><b>申报辅助表</b><button class="ghost small" onclick="window.open('/api/tax/export?book_id=${BOOK.id}&year=${y}&quarter=${quarter}')">导出 Excel</button></div>
     <div class="card"><b>近 60 天征期</b>${reminders.map(r2 => `<div class="kv">⏰ ${r2.due_date} ${r2.tax}（${r2.period}）</div>`).join('') || '<div class="result">无</div>'}</div>`;
+}
+
+/* ---------- 期初余额 ---------- */
+function flatten(nodes, out = []) { nodes.forEach(n => { out.push(n); if (n.children) flatten(n.children, out); }); return out; }
+
+async function renderOpening() {
+  const canEdit = ROLE === 'admin';
+  $('mainArea').innerHTML = `<h3 class="view-title">🏁 期初余额录入</h3><div id="t_body">加载中…</div>`;
+  try {
+    const [existing, tree] = await Promise.all([
+      api(`/api/books/${BOOK.id}/opening`),
+      api(`/api/accounts?book_id=${BOOK.id}&only_active=false`),
+    ]);
+    const map = {};
+    existing.forEach(o => { map[o.account_code] = o; });
+    const leaves = flatten(tree).filter(a => a.is_leaf);
+    const rows = leaves.map(a => `<tr><td>${a.code} ${a.name}${a.is_active ? '' : ' <span class="badge gray">停用</span>'}</td>
+      <td class="num"><input data-code="${a.code}" data-side="debit" value="${(map[a.code] || {}).debit ? parseFloat(map[a.code].debit) : ''}" placeholder="0" style="width:120px;text-align:right" ${canEdit ? '' : 'disabled'}></td>
+      <td class="num"><input data-code="${a.code}" data-side="credit" value="${(map[a.code] || {}).credit ? parseFloat(map[a.code].credit) : ''}" placeholder="0" style="width:120px;text-align:right" ${canEdit ? '' : 'disabled'}></td></tr>`).join('');
+    $('t_body').innerHTML = `<div class="result">录入启用期间（${BOOK.start_period}）之前各科目的期末余额；保存时自动试算平衡；账套已存在过账凭证后不允许修改。</div>
+      <table><tr><th>科目</th><th class="num">期初借方</th><th class="num">期初贷方</th></tr>${rows}</table>
+      <div class="vc-totals" id="op_totals"></div><div id="op_err" style="color:var(--danger)"></div>
+      ${canEdit ? '<button onclick="saveOpening()">保存期初余额</button>' : '<div class="result">仅管理员可保存</div>'}`;
+    updOpeningTotals();
+    document.querySelectorAll('#t_body input').forEach(inp => inp.addEventListener('input', updOpeningTotals));
+  } catch (e) { $('t_body').innerHTML = `<div class="result" style="color:var(--danger)">${e.message}</div>`; }
+}
+
+function updOpeningTotals() {
+  let dr = 0, cr = 0;
+  document.querySelectorAll('#t_body input').forEach(inp => {
+    const v = parseFloat(inp.value) || 0;
+    if (inp.dataset.side === 'debit') dr += v; else cr += v;
+  });
+  const el = document.getElementById('op_totals');
+  if (el) el.innerHTML = `<span>借方合计 ${dr.toFixed(2)}</span><span>贷方合计 ${cr.toFixed(2)}</span><span class="${Math.abs(dr - cr) < 0.005 ? 'diff-ok' : 'diff-bad'}">差额 ${(dr - cr).toFixed(2)}</span>`;
+}
+
+async function saveOpening() {
+  const seen = {};
+  document.querySelectorAll('#t_body input').forEach(inp => {
+    const v = parseFloat(inp.value);
+    if (!v) return;
+    const item = seen[inp.dataset.code] || { account_code: inp.dataset.code, debit: '0', credit: '0' };
+    item[inp.dataset.side] = v.toFixed(2);
+    seen[inp.dataset.code] = item;
+  });
+  const items = Object.values(seen);
+  if (!items.length) { alert('请至少录入一条期初余额'); return; }
+  try {
+    await api(`/api/books/${BOOK.id}/opening`, { method: 'PUT', body: JSON.stringify({ items }) });
+    alert('期初余额保存成功，余额表与报表的期初数已更新');
+    loadSummary();
+  } catch (e) { document.getElementById('op_err').textContent = '保存失败：' + e.message; }
+}
+
+/* ---------- 用户管理 ---------- */
+async function renderUsers() {
+  if (ROLE !== 'admin') {
+    $('mainArea').innerHTML = '<div class="result">用户管理需要管理员权限，请使用 admin 账号登录后访问。</div>';
+    return;
+  }
+  $('mainArea').innerHTML = `<h3 class="view-title">👥 用户管理</h3><div id="t_body">加载中…</div>`;
+  const users = await api('/api/users');
+  $('t_body').innerHTML = `<table><tr><th>用户名</th><th>姓名</th><th>角色</th><th>状态</th><th>操作</th></tr>` +
+    users.map(u => `<tr><td>${u.username}</td><td>${u.display_name || ''}</td>
+      <td><select onchange="patchUser(${u.id},{role:this.value})">
+        ${['admin', 'bookkeeper', 'auditor'].map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${{admin:'管理员',bookkeeper:'制单',auditor:'审核'}[r]}</option>`).join('')}
+      </select></td>
+      <td>${u.is_active ? '<span class="badge">启用</span>' : '<span class="badge gray">停用</span>'}</td>
+      <td><button class="small ghost" onclick="resetPwd(${u.id},'${u.username}')">重置密码</button>
+      <button class="small ghost" onclick="patchUser(${u.id},{is_active:${!u.is_active}})">${u.is_active ? '停用' : '启用'}</button>
+      <button class="small danger" onclick="delUser(${u.id},'${u.username}')">删除</button></td></tr>`).join('') + '</table>' +
+    `<div class="card" style="margin-top:1rem"><b>新增用户</b>
+      <div class="vc-line" style="grid-template-columns:1fr 1fr 1fr 1fr auto">
+        <input id="nu_name" placeholder="用户名（≥3字符）"><input id="nu_pass" type="password" placeholder="密码（≥6字符）">
+        <input id="nu_disp" placeholder="姓名"><select id="nu_role"><option value="bookkeeper">制单</option><option value="auditor">审核</option><option value="admin">管理员</option></select>
+        <button onclick="createUser()">创建</button></div>
+      <div id="nu_err" style="color:var(--danger);font-size:.82rem"></div>
+      <div class="result">角色说明：制单（妈妈日常记账）/ 审核（你审核与过账）/ 管理员（全部权限）。制单与审核必须不同账号，系统强制岗位分离。</div></div>`;
+}
+
+async function patchUser(id, body) {
+  try { await api('/api/users/' + id, { method: 'PATCH', body: JSON.stringify(body) }); renderUsers(); }
+  catch (e) { alert('操作失败：' + e.message); }
+}
+
+function resetPwd(id, name) {
+  const p = prompt(`为 ${name} 设置新密码（至少6位）：`);
+  if (p === null) return;
+  if (p.length >= 6) patchUser(id, { password: p });
+  else alert('密码至少6位');
+}
+
+async function delUser(id, name) {
+  if (!confirm(`确定删除用户 ${name}？`)) return;
+  try { await api('/api/users/' + id, { method: 'DELETE' }); renderUsers(); }
+  catch (e) { alert('删除失败：' + e.message); }
+}
+
+async function createUser() {
+  try {
+    await api('/api/users', {
+      method: 'POST',
+      body: JSON.stringify({ username: $('nu_name').value, password: $('nu_pass').value, display_name: $('nu_disp').value, role: $('nu_role').value }),
+    });
+    renderUsers();
+  } catch (e) { $('nu_err').textContent = '创建失败：' + e.message; }
 }
 
 /* ---------- 右栏 ---------- */
