@@ -52,6 +52,15 @@ def get_income_statement(
     return report_service.income_statement(db, book_id=book_id, period=period)
 
 
+@router.get("/cash-flow")
+def get_cash_flow(
+    book_id: int, period: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+):
+    from app.ledger.cashflow import cash_flow
+
+    return cash_flow(db, book_id=book_id, period=period)
+
+
 @router.get("/export")
 def export_report(
     book_id: int,

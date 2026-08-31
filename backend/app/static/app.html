@@ -81,6 +81,7 @@
     <div data-view="tb">📊 科目余额表</div>
     <div data-view="is">📈 利润表</div>
     <div data-view="bs">📉 资产负债表</div>
+    <div data-view="cf">🪙 现金流量表</div>
     <div data-view="invoices">🧾 发票</div>
     <div data-view="tax">💰 报税</div>
     <div data-view="llm">🤖 模型设置</div>
@@ -170,7 +171,7 @@ function switchView(view) {
   document.querySelectorAll('#sideNav div').forEach(el => el.classList.toggle('active', el.dataset.view === view));
   const main = $('mainArea');
   if (view === 'llm') { window.open('/settings', '_blank'); return; }
-  ({ chat: renderChat, vouchers: renderVouchers, tb: renderTB, is: renderIS, bs: renderBS, invoices: renderInvoices, tax: renderTax })[view]();
+  ({ chat: renderChat, vouchers: renderVouchers, tb: renderTB, is: renderIS, bs: renderBS, cf: renderCF, invoices: renderInvoices, tax: renderTax })[view]();
 }
 
 function addBubble(html, cls = 'ai') {
@@ -395,6 +396,14 @@ async function renderBS() {
     r.rows.map(row => `<tr class="${row.bold ? 'total-row' : ''}"><td>${row.name}</td><td class="num">${row.closing}</td><td class="num">${row.year_begin}</td></tr>`).join('') + '</table>';
 }
 
+async function renderCF() {
+  $('mainArea').innerHTML = `<h3 class="view-title">🪙 现金流量表（${PERIOD}）</h3><div id="t_body">加载中…</div>`;
+  const r = await api(`/api/reports/cash-flow?book_id=${BOOK.id}&period=${PERIOD}`);
+  $('t_body').innerHTML = `<table><tr><th>项目</th><th class="num">本月金额</th><th class="num">本年累计</th></tr>` +
+    r.rows.map(row => `<tr class="${row.bold ? 'total-row' : ''}"><td>${row.name}</td><td class="num">${row.month}</td><td class="num">${row.year_to_date}</td></tr>`).join('') + '</table>' +
+    `<div class="result" style="margin-top:.5rem">口径：直接法；现金内部划转（如提现）已剔除；净增加额与现金类科目变动自动对账。</div>`;
+}
+
 async function renderInvoices() {
   $('mainArea').innerHTML = `<h3 class="view-title">🧾 发票 <button class="ghost small" onclick="location.href='/docs'">去导入金税 Excel</button></h3><div id="t_body">加载中…</div>`;
   const list = await api(`/api/invoices?book_id=${BOOK.id}`);
@@ -443,6 +452,10 @@ async function loadSummary() {
       <div class="kv"><span>未分配利润</span><b>${(bs.rows.find(r2 => r2.key === 'undistributed_profits') || {}).closing || '0.00'}</b></div>`;
   } catch (e) { $('rp_summary').textContent = '加载失败'; }
 }
+
+document.querySelectorAll('#sideNav div').forEach(el => {
+  el.addEventListener('click', () => switchView(el.dataset.view));
+});
 
 if (TOKEN) { boot().catch(() => {}); } else { $('l_pass').focus(); }
 </script>
