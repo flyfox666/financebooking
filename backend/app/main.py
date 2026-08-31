@@ -8,7 +8,7 @@ from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import attachments, auth, books, periods, reports, system, users, vouchers
+from app.api import attachments, auth, books, invoices, periods, reports, system, tax, users, vouchers
 from app.core.backup import run_backup_now
 
 BACKUP_HOUR = 3
@@ -60,3 +60,5 @@ app.include_router(vouchers.router)
 app.include_router(periods.router)
 app.include_router(reports.router)
 app.include_router(attachments.router)
+app.include_router(invoices.router)
+app.include_router(tax.router)
