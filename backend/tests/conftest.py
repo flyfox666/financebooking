@@ -142,6 +142,15 @@ def mock_month_with_carryover(db_session, mock_month, book, mama_user, auditor_u
 
 
 @pytest.fixture()
+def attachments_dir(tmp_path, monkeypatch):
+    from app.core.config import get_settings
+
+    target = tmp_path / "attachments"
+    monkeypatch.setattr(get_settings(), "ATTACHMENTS_DIR", str(target))
+    return target
+
+
+@pytest.fixture()
 def get_posted_nets(db_session):
     def _run(book_id: int) -> dict[str, Decimal]:
         rows = db_session.execute(

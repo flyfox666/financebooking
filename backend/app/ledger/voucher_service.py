@@ -213,6 +213,9 @@ def delete_voucher(db: Session, *, voucher_id: int) -> None:
     voucher = _load_voucher(db, voucher_id)
     if voucher.status != "draft":
         raise VoucherError("只有草稿凭证可以删除")
+    from app.ledger.attachment_service import purge_voucher_attachments
+
+    purge_voucher_attachments(db, voucher)
     db.delete(voucher)
     db.commit()
 

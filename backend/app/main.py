@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, books, periods, reports, system, users, vouchers
+from app.api import attachments, auth, books, periods, reports, system, users, vouchers
 from app.core.database import Base, engine
 from app.models import Account, Book, User
 
@@ -31,3 +31,4 @@ app.include_router(books.router)
 app.include_router(vouchers.router)
 app.include_router(periods.router)
 app.include_router(reports.router)
+app.include_router(attachments.router)
