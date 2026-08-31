@@ -92,17 +92,28 @@ def _validate_lines(
         if account is None:
             raise VoucherError(f"第 {idx} 行科目 {account_code} 不存在")
         contact_id = raw.get("contact_id") or None
+        aux_config = [x for x in (account.aux_types or "").split(",") if x]
+        contact_required = bool(aux_config)
+        allowed_types = [
+            x.split(":", 1)[1] for x in aux_config if x.startswith("contact:")
+        ]
         if strict_accounts:
             if not account.is_active:
                 raise VoucherError(f"科目 {account_code} 已停用，不能在新凭证中使用")
             if not account.is_leaf:
                 raise VoucherError(f"科目 {account_code} 存在下级明细，请使用明细科目")
-        if "contact" in (account.aux_types or ""):
+        if contact_required:
             if not contact_id:
                 raise VoucherError(f"第 {idx} 行科目 {account_code} 启用了往来辅助核算，必须选择往来单位")
             contact = db.get(Contact, int(contact_id))
             if contact is None or contact.book_id != book_id or not contact.is_active:
                 raise VoucherError(f"第 {idx} 行往来单位不存在或已停用")
+            if allowed_types and contact.ctype not in allowed_types:
+                type_cn = {"customer": "客户", "supplier": "供应商", "employee": "员工", "other": "其他往来"}
+                raise VoucherError(
+                    f"第 {idx} 行科目 {account_code} 仅允许往来类型 "
+                    f"{'、'.join(type_cn[t] for t in allowed_types)}，所选「{contact.name}」为{type_cn[contact.ctype]}"
+                )
         elif contact_id:
             contact = db.get(Contact, int(contact_id))
             if contact is None or contact.book_id != book_id:
@@ -313,6 +324,7 @@ def reverse_voucher(db: Session, *, voucher_id: int, operator: User) -> Voucher:
             "account_code": ln.account_code,
             "debit": -Decimal(str(ln.debit)),
             "credit": -Decimal(str(ln.credit)),
+            "contact_id": ln.contact_id,
         }
         for ln in voucher.lines
     ]

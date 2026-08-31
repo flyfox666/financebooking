@@ -51,8 +51,10 @@ def create_book(
     db.flush()
     seed_accounts(db, book.id)
     seed_report_templates(db, book.id)
+    from app.ledger.aux_service import seed_aux_defaults
     from app.ledger.tax.params import seed_tax_params
 
+    seed_aux_defaults(db, book.id)
     seed_tax_params(db, book.id)
     db.refresh(book)
     return book

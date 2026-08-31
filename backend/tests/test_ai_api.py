@@ -22,7 +22,7 @@ def test_parse_without_file_and_note_rejected(client, auth_headers, book):
 
 
 def test_parse_and_suggest_and_confirm_full_flow(
-    client, db_session, book, mama_user, auth_headers, attachments_dir, monkeypatch
+    client, db_session, book, mama_user, auth_headers, attachments_dir, monkeypatch, contacts_pair
 ):
     parse_resp = _upload_xml(client, auth_headers, book)
     assert parse_resp.status_code == 200, parse_resp.text
@@ -50,19 +50,22 @@ def test_parse_and_suggest_and_confirm_full_flow(
     assert suggestion["confidence"] == 0.9
     assert suggestion["voucher"]["lines"][0]["debit"] == "11300.00"
 
+    confirm_lines = suggestion["voucher"]["lines"]
+    confirm_lines[0]["contact_id"] = contacts_pair["customer"].id
     confirm_resp = client.post(
         "/api/ai/confirm",
         headers=auth_headers,
         json={
             "doc_id": doc_id,
             "voucher_date": "2026-08-05",
-            "lines": suggestion["voucher"]["lines"],
+            "lines": confirm_lines,
         },
     )
     assert confirm_resp.status_code == 201, confirm_resp.text
     voucher = confirm_resp.json()
     assert voucher["source"] == "ai"
     assert voucher["attachment_count"] == 1
+    assert voucher["lines"][0]["contact_id"] == contacts_pair["customer"].id
 
     doc = db_session.get(AIDoc, doc_id)
     assert doc.status == "confirmed"

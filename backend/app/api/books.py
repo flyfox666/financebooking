@@ -142,11 +142,16 @@ def patch_account_aux(
 ):
     requested = [item for item in (aux_types or "").split(",") if item]
     try:
-        account = aux_service.set_aux_types(db, book_id=book_id, code=code, aux_types=requested)
+        account, warned = aux_service.set_aux_types(db, book_id=book_id, code=code, aux_types=requested)
     except LedgerError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    return {
+    response = {
         "code": account.code,
         "name": account.name,
         "aux_types": [item for item in (account.aux_types or "").split(",") if item],
+        "warning": (
+            "该科目已有凭证发生额：本次配置修改对新凭证生效，历史凭证保持原样，请注意核对期初与辅助余额。"
+            if warned else ""
+        ),
     }
+    return response

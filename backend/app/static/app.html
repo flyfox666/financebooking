@@ -82,6 +82,7 @@
     <div class="active" data-view="chat">💬 对话记账</div>
     <div data-view="vouchers">📋 凭证</div>
     <div data-view="accounts">🗂 科目设置</div>
+    <div data-view="contacts">🤝 往来单位</div>
     <div data-view="tb">📊 科目余额表</div>
     <div data-view="reports">📑 报表模块</div>
     <div data-view="opening">🏁 期初余额</div>
@@ -115,6 +116,7 @@ const $ = id => document.getElementById(id);
 const STATUS_CN = { draft:'草稿', submitted:'待审核', audited:'已审核', posted:'已过账', voided:'已冲销' };
 const SOURCE_CN = { manual:'手工', ai:'AI生成', carryover:'结转', reverse:'红冲' };
 const ROLE_CN = { admin:'管理员', bookkeeper:'制单', auditor:'审核' };
+const CTYPE_CN = { customer:'客户', supplier:'供应商', employee:'员工', other:'其他往来' };
 
 async function api(path, options = {}) {
   const resp = await fetch(path, {
@@ -184,7 +186,7 @@ function switchView(view) {
   currentView = view;
   document.querySelectorAll('#sideNav div').forEach(el => el.classList.toggle('active', el.dataset.view === view));
   if (view === 'llm') { window.open('/settings', '_blank'); return; }
-  ({ chat: renderChat, vouchers: renderVouchers, accounts: renderAccounts, tb: renderTB, reports: renderReports,
+  ({ chat: renderChat, vouchers: renderVouchers, accounts: renderAccounts, contacts: renderContactsView, tb: renderTB, reports: renderReports,
      opening: renderOpening, invoices: renderInvoices, tax: renderTax, users: renderUsers })[view]();
 }
 
@@ -223,10 +225,18 @@ function renderChat() {
   $('chatFile').onchange = () => { if ($('chatFile').files[0]) send(); };
 }
 
-function contactOptions(selected) {
+function contactOptions(selected, allowedTypes) {
+  const usable = CONTACTS.filter(c =>
+    c.is_active && (!allowedTypes || !allowedTypes.length || allowedTypes.includes(c.ctype)));
   return `<option value="">往来单位</option>` +
-    CONTACTS.filter(c => c.is_active).map(c =>
-      `<option value="${c.id}" ${Number(selected) === c.id ? 'selected' : ''}>${c.name}</option>`).join('');
+    usable.map(c =>
+      `<option value="${c.id}" ${Number(selected) === c.id ? 'selected' : ''}>${c.name}（${CTYPE_CN[c.ctype] || c.ctype}）</option>`).join('');
+}
+
+function auxTypesOf(accountCode) {
+  const a = ACCOUNTS.find(x => x.code === accountCode);
+  return (a && a.aux_types ? a.aux_types : '')
+    .split(',').filter(Boolean).map(x => x.replace('contact:', '')).filter(x => x !== 'contact');
 }
 
 function lineEditorHTML(lines, updFn, delFn) {
@@ -239,7 +249,7 @@ function lineEditorHTML(lines, updFn, delFn) {
           `<option value="${a.code}" ${a.code === line.account_code ? 'selected' : ''}>${a.code} ${a.name}</option>`).join('')}
       </select>
       <select onchange="${updFn}(${i},'contact_id',this.value?parseInt(this.value):null)">
-        ${contactOptions(line.contact_id)}
+        ${contactOptions(line.contact_id, auxTypesOf(line.account_code))}
       </select>
       <input class="num" value="${line.debit || ''}" placeholder="借方" onchange="${updFn}(${i},'debit',this.value)">
       <input class="num" value="${line.credit || ''}" placeholder="贷方" onchange="${updFn}(${i},'credit',this.value)">
@@ -449,28 +459,22 @@ async function act(id, action) {
 }
 
 /* ---------- 科目设置 ---------- */
+let auxEditCode = null;
+
 async function renderAccounts() {
-  $('mainArea').innerHTML = `<h3 class="view-title">🗂 科目设置</h3><div id="acc_body">加载中…</div>
+  $('mainArea').innerHTML = `<h3 class="view-title">🗂 科目设置</h3><div id="aux_panel"></div><div id="acc_body">加载中…</div>
     <div class="card" style="margin-top:1rem"><b>➕ 新增明细科目</b>
       <div class="vc-line" style="grid-template-columns:1fr 140px 140px auto">
         <select id="na_parent">${ACCOUNTS.filter(a => a.is_leaf && a.level < 3).map(a => `<option value="${a.code}">${a.code} ${a.name}</option>`).join('')}</select>
         <input id="na_code" placeholder="编码 如 5602.11">
         <input id="na_name" placeholder="科目名称">
         <button onclick="createAccount()">创建</button>
-      </div><div id="na_err" style="color:var(--danger);font-size:.82rem"></div></div>
-    <div class="card"><b>🤝 往来单位档案</b><div id="ct_body"></div>
-      <div class="vc-line" style="grid-template-columns:1fr 140px 120px auto;margin-top:.5rem">
-        <input id="ct_name" placeholder="单位名称"><input id="ct_tax" placeholder="税号(可选)">
-        <select id="ct_type"><option value="customer">客户</option><option value="supplier">供应商</option></select>
-        <button onclick="createContact()">新增</button>
-      </div></div>`;
+      </div><div id="na_err" style="color:var(--danger);font-size:.82rem"></div>
+      <div class="result">往来单位档案请前往「🤝 往来单位」模块维护。</div></div>`;
   renderAccountTree();
-  renderContactTable();
 }
 
 function renderAccountTree() {
-  const tree = {};
-  ACCOUNTS.forEach(a => { tree[a.code] = a; });
   const children = {};
   ACCOUNTS.forEach(a => {
     const key = a.parent_code || '_root';
@@ -479,32 +483,61 @@ function renderAccountTree() {
   const rows = [];
   (function walk(list, depth) {
     list.sort((x, y) => x.code.localeCompare(y.code)).forEach(a => {
+      const auxTypes = auxTypesOf(a.code);
       rows.push(`
         <tr class="${a.level === 1 ? 'rollup-row' : ''}" style="${a.is_active ? '' : 'opacity:.5'}">
           <td style="padding-left:${depth * 1.2}rem">${a.code} ${a.name}${a.is_preset ? '' : ' <span class="badge gray">自建</span>'}</td>
-          <td>${a.aux_types ? `<span class="badge">往来核算</span>` : ''}</td>
+          <td>${auxTypes.length ? auxTypes.map(t => `<span class="badge">${CTYPE_CN[t] || t}</span>`).join('') : ''}</td>
           <td>${a.is_active ? '<span class="badge">启用</span>' : '<span class="badge gray">停用</span>'}</td>
           <td>${ROLE === 'admin' ? `
             <button class="small ghost" onclick="toggleAccount('${a.code}',${a.is_active})">${a.is_active ? '停用' : '启用'}</button>
-            <button class="small ghost" onclick="toggleAux('${a.code}','${a.aux_types ? '1' : ''}')">${a.aux_types ? '取消往来' : '设为往来'}</button>` : ''}</td>
+            <button class="small ghost" onclick="openAuxEditor('${a.code}')">辅助核算</button>` : ''}</td>
         </tr>`);
       if (children[a.code]) walk(children[a.code], depth + 1);
     });
   })(children['_root'] || [], 0);
-  $('acc_body').innerHTML = `<table><tr><th>科目</th><th>辅助核算</th><th>状态</th><th>操作（管理员）</th></tr>${rows.join('')}</table>
-    <div class="result" style="margin-top:.5rem">说明：预置一级科目只能停用不能删除；勾「设为往来」后，录凭证选该科目必须指定往来单位（客户/供应商）；已发生业务的科目不建议停用。</div>`;
+  $('acc_body').innerHTML = `<table><tr><th>科目</th><th>辅助核算（往来类型）</th><th>状态</th><th>操作（管理员）</th></tr>${rows.join('')}</table>
+    <div class="result" style="margin-top:.5rem">说明：启用辅助核算后，录凭证选该科目必须选择对应类型的往来单位；默认已按标准配置（应收/预收→客户，应付/预付→供应商，其他应收/应付→员工与其他往来）；有发生额的科目修改配置会收到警示，修改对新凭证生效。</div>`;
+}
+
+function openAuxEditor(code) {
+  auxEditCode = code;
+  const account = ACCOUNTS.find(a => a.code === code);
+  const current = auxTypesOf(code);
+  const panel = $('aux_panel');
+  panel.innerHTML = `<div class="card" style="border-color:var(--accent)">
+    <b>辅助核算配置：${account.code} ${account.name}</b>
+    <div class="chips" style="margin:.5rem 0">
+      ${Object.keys(CTYPE_CN).map(t => `<span class="chip ${current.includes(t) ? 'on' : ''}" onclick="toggleAuxChip('${t}',this)">${CTYPE_CN[t]}</span>`).join('')}
+    </div>
+    <div id="aux_warn" style="color:var(--amber);font-size:.82rem"></div>
+    <button onclick="saveAux('${code}')">保存配置</button>
+    <button class="ghost" onclick="auxEditCode=null;$('aux_panel').innerHTML=''">取消</button>
+    <div class="result">勾选即启用该类型的往来辅助核算；取消全部勾选=关闭辅助核算。</div>
+  </div>`;
+  panel.scrollIntoView({ behavior: 'smooth' });
+}
+
+function toggleAuxChip(type, el) {
+  el.classList.toggle('on');
+}
+
+async function saveAux(code) {
+  const panel = $('aux_panel');
+  const types = [...panel.querySelectorAll('.chip.on')].map(el =>
+    Object.keys(CTYPE_CN).find(k => CTYPE_CN[k] === el.textContent));
+  try {
+    const r = await api(`/api/accounts/${code}/aux?book_id=${BOOK.id}&aux_types=${types.map(t => 'contact:' + t).join(',')}`, { method: 'PATCH' });
+    await loadMasters();
+    renderAccountTree();
+    $('aux_warn').textContent = r.warning || '配置已保存';
+    if (r.warning) { const w = $('aux_warn'); w.style.color = 'var(--amber)'; }
+  } catch (e) { $('aux_warn').textContent = '保存失败：' + e.message; $('aux_warn').style.color = 'var(--danger)'; }
 }
 
 async function toggleAccount(code, isActive) {
   try { await api(`/api/accounts/${code}?book_id=${BOOK.id}`, { method: 'PATCH', body: JSON.stringify({ is_active: !isActive }) }); await loadMasters(); renderAccountTree(); }
   catch (e) { alert('操作失败：' + e.message); }
-}
-
-async function toggleAux(code, current) {
-  try {
-    await api(`/api/accounts/${code}/aux?book_id=${BOOK.id}&aux_types=${current ? '' : 'contact'}`, { method: 'PATCH' });
-    await loadMasters(); renderAccountTree();
-  } catch (e) { alert('操作失败：' + e.message); }
 }
 
 async function createAccount() {
@@ -517,24 +550,55 @@ async function createAccount() {
   } catch (e) { $('na_err').textContent = '创建失败：' + e.message; }
 }
 
-function renderContactTable() {
-  $('ct_body').innerHTML = CONTACTS.length ? `<table><tr><th>名称</th><th>类型</th><th>税号</th><th>状态</th><th>操作</th></tr>` +
-    CONTACTS.map(c => `<tr><td>${c.name}</td><td>${c.ctype === 'customer' ? '客户' : '供应商'}</td><td>${c.tax_no || ''}</td>
-      <td>${c.is_active ? '<span class="badge">启用</span>' : '<span class="badge gray">停用</span>'}</td>
-      <td>${ROLE === 'admin' ? `<button class="small ghost" onclick="toggleContact(${c.id},${c.is_active})">${c.is_active ? '停用' : '启用'}</button>` : ''}</td></tr>`).join('') + '</table>'
-    : '<div class="result">暂无往来单位。客户（应收）与供应商（应付）档案在此维护。</div>';
+/* ---------- 往来单位（独立模块） ---------- */
+let contactTab = '';
+
+async function renderContactsView() {
+  $('mainArea').innerHTML = `<h3 class="view-title">🤝 往来单位</h3>
+    <div class="chips" id="ct_tabs"></div><div id="t_body">加载中…</div>
+    <div class="card" style="margin-top:1rem"><b>➕ 新增往来单位</b>
+      <div class="vc-line" style="grid-template-columns:1fr 160px 1fr 1fr auto">
+        <input id="nc_name" placeholder="单位名称（必填）">
+        <select id="nc_type">
+          <option value="customer">客户（应收/预收）</option>
+          <option value="supplier">供应商（应付/预付）</option>
+          <option value="employee">员工（备用金/代垫）</option>
+          <option value="other">其他往来（股东垫款等）</option>
+        </select>
+        <input id="nc_tax" placeholder="税号（可选）">
+        <input id="nc_memo" placeholder="备注（可选）">
+        <button onclick="createContactNew()">新增</button>
+      </div><div id="nc_err" style="color:var(--danger);font-size:.82rem"></div>
+      <div class="result">类型决定可用于哪些科目：应收/预收类科目只能选客户，应付/预付类只能选供应商，其他应收/应付可选员工与其他往来。</div></div>`;
+  const tabs = [['', '全部'], ['customer', '客户'], ['supplier', '供应商'], ['employee', '员工'], ['other', '其他往来']];
+  tabs.forEach(([key, label]) => {
+    const chip = document.createElement('span');
+    chip.className = 'chip' + (contactTab === key ? ' on' : '');
+    chip.textContent = label;
+    chip.onclick = () => { contactTab = key; renderContactsView(); };
+    $('ct_tabs').appendChild(chip);
+  });
+  try {
+    const list = await api(`/api/contacts?book_id=${BOOK.id}${contactTab ? '&ctype=' + contactTab : ''}`);
+    $('t_body').innerHTML = list.length ? `<table><tr><th>名称</th><th>类型</th><th>税号</th><th>被哪些科目使用</th><th>状态</th><th>操作</th></tr>` +
+      list.map(c => `<tr><td>${c.name}</td><td><span class="badge ${c.ctype === 'customer' ? '' : 'gray'}">${CTYPE_CN[c.ctype]}</span></td>
+        <td>${c.tax_no || ''}</td><td>${c.used_by && c.used_by.length ? c.used_by.join('、') : '<span class="result">暂无</span>'}</td>
+        <td>${c.is_active ? '<span class="badge">启用</span>' : '<span class="badge gray">停用</span>'}</td>
+        <td>${ROLE === 'admin' ? `<button class="small ghost" onclick="toggleContactNew(${c.id},${c.is_active})">${c.is_active ? '停用' : '启用'}</button>` : ''}</td></tr>`).join('') + '</table>'
+      : '<div class="result">该类型下暂无往来单位。</div>';
+  } catch (e) { $('t_body').innerHTML = `<div class="result" style="color:var(--danger)">加载失败：${e.message}</div>`; }
 }
 
-async function toggleContact(id, isActive) {
-  try { await api(`/api/contacts/${id}?is_active=${!isActive}`, { method: 'PATCH' }); await loadMasters(); renderContactTable(); }
+async function toggleContactNew(id, isActive) {
+  try { await api(`/api/contacts/${id}?is_active=${!isActive}`, { method: 'PATCH' }); await loadMasters(); renderContactsView(); }
   catch (e) { alert('操作失败：' + e.message); }
 }
 
-async function createContact() {
+async function createContactNew() {
   try {
-    await api(`/api/contacts?book_id=${BOOK.id}&name=${encodeURIComponent($('ct_name').value)}&ctype=${$('ct_type').value}&tax_no=${encodeURIComponent($('ct_tax').value)}`, { method: 'POST' });
-    await loadMasters(); renderAccounts();
-  } catch (e) { alert('新增失败：' + e.message); }
+    await api(`/api/contacts?book_id=${BOOK.id}&name=${encodeURIComponent($('nc_name').value)}&ctype=${$('nc_type').value}&tax_no=${encodeURIComponent($('nc_tax').value)}`, { method: 'POST' });
+    await loadMasters(); renderContactsView();
+  } catch (e) { $('nc_err').textContent = '新增失败：' + e.message; }
 }
 
 /* ---------- 科目余额表（完整树形） ---------- */

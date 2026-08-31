@@ -19,16 +19,19 @@ def list_contacts(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return [
-        {
+    from app.ledger.aux_service import contact_used_by_labels
+
+    result = []
+    for c in aux_service.list_contacts(db, book_id, ctype):
+        result.append({
             "id": c.id,
             "name": c.name,
             "tax_no": c.tax_no,
             "ctype": c.ctype,
             "is_active": c.is_active,
-        }
-        for c in aux_service.list_contacts(db, book_id, ctype)
-    ]
+            "used_by": contact_used_by_labels(db, book_id, c.id),
+        })
+    return result
 
 
 @router.post("", status_code=201)

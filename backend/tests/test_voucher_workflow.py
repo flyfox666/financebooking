@@ -97,12 +97,15 @@ def test_delete_only_draft(db_session, book, mama_user, auditor_user):
         voucher_service.delete_voucher(db_session, voucher_id=posted.id)
 
 
-def test_reversal_flow(db_session, book, mama_user, auditor_user, admin_user, post_flow, get_posted_nets):
+def test_reversal_flow(db_session, book, mama_user, auditor_user, admin_user, post_flow, get_posted_nets, contacts_pair):
     from app.ledger.mock_data import setup_detail_accounts
+    from tests.conftest import _inject_contact
 
     setup_detail_accounts(db_session, book.id)
     vouchers = []
     for payload in voucher_payloads()[:6]:
+        for line in payload["lines"]:
+            _inject_contact(line, contacts_pair)
         voucher = voucher_service.create_voucher(
             db_session, book_id=book.id, operator_id=mama_user.id, **payload
         )

@@ -8,14 +8,17 @@ from app.ledger.tax.stamp import calc_stamp
 from app.ledger.tax.vat import calc_vat
 
 
-def _post_simple_vouchers(db_session, book, mama_user, auditor_user, post_flow):
+def _post_simple_vouchers(
+    db_session, book, mama_user, auditor_user, post_flow, contacts_pair
+):
+    customer_id = contacts_pair["customer"].id
     income = voucher_service.create_voucher(
         db_session,
         book_id=book.id,
         voucher_date="2026-08-05",
         attachment_count=1,
         lines=[
-            {"summary": "开票收入", "account_code": "1122", "debit": "50000.00", "credit": "0"},
+            {"summary": "开票收入", "account_code": "1122", "debit": "50000.00", "credit": "0", "contact_id": customer_id},
             {"summary": "确认收入", "account_code": "5001", "debit": "0", "credit": "49504.95"},
             {"summary": "增值税", "account_code": "2221", "debit": "0", "credit": "495.05"},
         ],
@@ -48,7 +51,7 @@ def _post_simple_vouchers(db_session, book, mama_user, auditor_user, post_flow):
 
 
 def test_vat_under_threshold_exempts_general_invoices(
-    client, auth_headers, db_session, book, mama_user, auditor_user, post_flow
+    client, auth_headers, db_session, book, mama_user, auditor_user, post_flow, contacts_pair
 ):
     from tests.mock_invoices import quarter3_under_threshold
 
@@ -58,7 +61,7 @@ def test_vat_under_threshold_exempts_general_invoices(
         params={"book_id": book.id, "kind": "sales"},
         files={"file": ("sales.xlsx", quarter3_under_threshold(), "application/vnd.ms-excel")},
     )
-    _post_simple_vouchers(db_session, book, mama_user, auditor_user, post_flow)
+    _post_simple_vouchers(db_session, book, mama_user, auditor_user, post_flow, contacts_pair)
 
     result = client.get(
         "/api/tax/vat",
@@ -97,8 +100,8 @@ def test_vat_over_threshold_taxes_everything(client, auth_headers, book):
     assert result["surtax"]["total"] == "213.86"
 
 
-def test_cit_small_micro_preferential(client, auth_headers, db_session, book, mama_user, auditor_user, post_flow):
-    _post_simple_vouchers(db_session, book, mama_user, auditor_user, post_flow)
+def test_cit_small_micro_preferential(client, auth_headers, db_session, book, mama_user, auditor_user, post_flow, contacts_pair):
+    _post_simple_vouchers(db_session, book, mama_user, auditor_user, post_flow, contacts_pair)
     result = client.get(
         "/api/tax/cit",
         headers=auth_headers,

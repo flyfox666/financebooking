@@ -1,17 +1,18 @@
-from decimal import Decimal
-
 from app.ledger.mock_data import setup_detail_accounts
 
-INCOME_PAYLOAD = {
-    "voucher_date": "2026-08-06",
-    "attachment_count": 1,
-    "source": "manual",
-    "lines": [
-        {"summary": "开票应收技术服务费", "account_code": "1122", "debit": "11300.00", "credit": "0"},
-        {"summary": "确认技术服务收入", "account_code": "5001", "debit": "0", "credit": "11188.12"},
-        {"summary": "计提增值税1%", "account_code": "2221", "debit": "0", "credit": "111.88"},
-    ],
-}
+
+def income_payload(contacts_pair):
+    customer_id = contacts_pair["customer"].id
+    return {
+        "voucher_date": "2026-08-06",
+        "attachment_count": 1,
+        "source": "manual",
+        "lines": [
+            {"summary": "开票应收技术服务费", "account_code": "1122", "debit": "11300.00", "credit": "0", "contact_id": customer_id},
+            {"summary": "确认技术服务收入", "account_code": "5001", "debit": "0", "credit": "11188.12"},
+            {"summary": "计提增值税1%", "account_code": "2221", "debit": "0", "credit": "111.88"},
+        ],
+    }
 
 
 def _headers(client, username, password):
@@ -22,18 +23,22 @@ def _headers(client, username, password):
 
 def test_create_requires_auth(client, book):
     resp = client.post(
-        "/api/vouchers", params={"book_id": book.id}, json=INCOME_PAYLOAD
+        "/api/vouchers", params={"book_id": book.id},
+        json={"voucher_date": "2026-08-06", "lines": [
+            {"summary": "a", "account_code": "1002", "debit": "1", "credit": "0"},
+            {"summary": "b", "account_code": "5603", "debit": "0", "credit": "1"},
+        ]},
     )
     assert resp.status_code == 401
 
 
-def test_full_http_flow(client, book, admin_user, mama_user, auditor_user):
+def test_full_http_flow(client, book, admin_user, mama_user, auditor_user, contacts_pair):
     mama_h = _headers(client, "mama", "mama123456")
     papa_h = _headers(client, "papa", "papa123456")
     admin_h = _headers(client, "admin", "admin123")
 
     resp = client.post(
-        "/api/vouchers", params={"book_id": book.id}, headers=mama_h, json=INCOME_PAYLOAD
+        "/api/vouchers", params={"book_id": book.id}, headers=mama_h, json=income_payload(contacts_pair)
     )
     assert resp.status_code == 201, resp.text
     data = resp.json()
@@ -70,12 +75,12 @@ def test_full_http_flow(client, book, admin_user, mama_user, auditor_user):
     assert detail["lines"][1]["credit"] == "11188.12"
 
 
-def test_creator_cannot_self_audit(client, book, admin_user, mama_user, auditor_user):
+def test_creator_cannot_self_audit(client, book, admin_user, mama_user, auditor_user, contacts_pair):
     admin_h = _headers(client, "admin", "admin123")
     papa_h = _headers(client, "papa", "papa123456")
 
     resp = client.post(
-        "/api/vouchers", params={"book_id": book.id}, headers=admin_h, json=INCOME_PAYLOAD
+        "/api/vouchers", params={"book_id": book.id}, headers=admin_h, json=income_payload(contacts_pair)
     )
     voucher_id = resp.json()["id"]
     client.post(f"/api/vouchers/{voucher_id}/submit", headers=admin_h)
@@ -87,11 +92,11 @@ def test_creator_cannot_self_audit(client, book, admin_user, mama_user, auditor_
     assert resp.status_code == 200
 
 
-def test_patch_and_delete_draft_only(client, book, admin_user, mama_user, auditor_user):
+def test_patch_and_delete_draft_only(client, book, admin_user, mama_user, auditor_user, contacts_pair):
     admin_h = _headers(client, "admin", "admin123")
 
     resp = client.post(
-        "/api/vouchers", params={"book_id": book.id}, headers=admin_h, json=INCOME_PAYLOAD
+        "/api/vouchers", params={"book_id": book.id}, headers=admin_h, json=income_payload(contacts_pair)
     )
     draft_id = resp.json()["id"]
 
@@ -101,7 +106,7 @@ def test_patch_and_delete_draft_only(client, book, admin_user, mama_user, audito
     assert resp.status_code == 200
     assert resp.json()["attachment_count"] == 2
 
-    new_lines = dict(INCOME_PAYLOAD)
+    new_lines = income_payload(contacts_pair)
     new_lines["lines"] = [
         {"summary": "买办公用品", "account_code": "5602", "debit": "100.00", "credit": "0"},
         {"summary": "银行付款", "account_code": "1002", "debit": "0", "credit": "100.00"},
@@ -116,7 +121,7 @@ def test_patch_and_delete_draft_only(client, book, admin_user, mama_user, audito
     mama_h = _headers(client, "mama", "mama123456")
     papa_h = _headers(client, "papa", "papa123456")
     resp = client.post(
-        "/api/vouchers", params={"book_id": book.id}, headers=mama_h, json=INCOME_PAYLOAD
+        "/api/vouchers", params={"book_id": book.id}, headers=mama_h, json=income_payload(contacts_pair)
     )
     posted_id = resp.json()["id"]
     client.post(f"/api/vouchers/{posted_id}/submit", headers=mama_h)
@@ -129,13 +134,13 @@ def test_patch_and_delete_draft_only(client, book, admin_user, mama_user, audito
     assert resp.status_code == 400
 
 
-def test_reverse_endpoint(client, book, admin_user, mama_user, auditor_user, get_posted_nets, db_session):
+def test_reverse_endpoint(client, book, admin_user, mama_user, auditor_user, get_posted_nets, db_session, contacts_pair):
     mama_h = _headers(client, "mama", "mama123456")
     papa_h = _headers(client, "papa", "papa123456")
     admin_h = _headers(client, "admin", "admin123")
 
     resp = client.post(
-        "/api/vouchers", params={"book_id": book.id}, headers=mama_h, json=INCOME_PAYLOAD
+        "/api/vouchers", params={"book_id": book.id}, headers=mama_h, json=income_payload(contacts_pair)
     )
     voucher_id = resp.json()["id"]
     client.post(f"/api/vouchers/{voucher_id}/submit", headers=mama_h)
@@ -163,14 +168,14 @@ def test_reverse_endpoint(client, book, admin_user, mama_user, auditor_user, get
 
 
 def test_carryover_endpoint(
-    client, db_session, book, admin_user, mama_user, auditor_user, auth_headers
+    client, db_session, book, admin_user, mama_user, auditor_user, auth_headers, contacts_pair
 ):
     setup_detail_accounts(db_session, book.id)
     mama_h = _headers(client, "mama", "mama123456")
     papa_h = _headers(client, "papa", "papa123456")
 
     resp = client.post(
-        "/api/vouchers", params={"book_id": book.id}, headers=mama_h, json=INCOME_PAYLOAD
+        "/api/vouchers", params={"book_id": book.id}, headers=mama_h, json=income_payload(contacts_pair)
     )
     voucher_id = resp.json()["id"]
     client.post(f"/api/vouchers/{voucher_id}/submit", headers=mama_h)

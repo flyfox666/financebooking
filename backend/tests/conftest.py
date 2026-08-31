@@ -118,12 +118,41 @@ def post_flow(db_session):
 
 
 @pytest.fixture()
-def mock_month(db_session, book, mama_user, auditor_user, post_flow):
+def contacts_pair(db_session, book):
+    from app.ledger import aux_service
+
+    customer = aux_service.create_contact(
+        db_session, book_id=book.id, name="测试客户", ctype="customer"
+    )
+    supplier = aux_service.create_contact(
+        db_session, book_id=book.id, name="测试供应商", ctype="supplier"
+    )
+    employee = aux_service.create_contact(
+        db_session, book_id=book.id, name="测试员工", ctype="employee"
+    )
+    return {"customer": customer, "supplier": supplier, "employee": employee}
+
+
+def _inject_contact(line, contacts_pair):
+    code = line.get("account_code", "")
+    if code.startswith(("1121", "1122", "2203")):
+        line["contact_id"] = contacts_pair["customer"].id
+    elif code.startswith(("1123", "2202")):
+        line["contact_id"] = contacts_pair["supplier"].id
+    elif code.startswith(("1221", "2241")):
+        line["contact_id"] = contacts_pair["employee"].id
+    return line
+
+
+@pytest.fixture()
+def mock_month(db_session, book, mama_user, auditor_user, post_flow, contacts_pair):
     from app.ledger.mock_data import setup_detail_accounts, voucher_payloads
 
     setup_detail_accounts(db_session, book.id)
     vouchers = []
     for payload in voucher_payloads():
+        for line in payload["lines"]:
+            _inject_contact(line, contacts_pair)
         voucher = voucher_service.create_voucher(
             db_session, book_id=book.id, operator_id=mama_user.id, **payload
         )
