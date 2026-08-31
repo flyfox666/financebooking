@@ -1,0 +1,81 @@
+"""《小企业会计准则》（财会〔2011〕17 号）附录 · 66 个一级科目权威目录。
+
+编码与名称依据财政部官方原文核对；不得套用《企业会计准则》编码
+（小企业准则：权益 3xxx、成本 4xxx、损益 5xxx）。
+元素：(编码, 名称, 类别, 余额方向, 默认启用)；direction: 1=借方，-1=贷方。
+"""
+
+ASSET = "asset"
+LIABILITY = "liability"
+EQUITY = "equity"
+COST = "cost"
+PNL = "pnl"
+
+ACCOUNT_CATALOG: list[tuple[str, str, str, int, bool]] = [
+    ("1001", "库存现金", ASSET, 1, True),
+    ("1002", "银行存款", ASSET, 1, True),
+    ("1012", "其他货币资金", ASSET, 1, False),
+    ("1101", "短期投资", ASSET, 1, False),
+    ("1121", "应收票据", ASSET, 1, False),
+    ("1122", "应收账款", ASSET, 1, True),
+    ("1123", "预付账款", ASSET, 1, True),
+    ("1131", "应收股利", ASSET, 1, False),
+    ("1132", "应收利息", ASSET, 1, False),
+    ("1221", "其他应收款", ASSET, 1, True),
+    ("1401", "材料采购", ASSET, 1, False),
+    ("1402", "在途物资", ASSET, 1, False),
+    ("1403", "原材料", ASSET, 1, False),
+    ("1404", "材料成本差异", ASSET, 1, False),
+    ("1405", "库存商品", ASSET, 1, False),
+    ("1407", "商品进销差价", ASSET, 1, False),
+    ("1408", "委托加工物资", ASSET, 1, False),
+    ("1411", "周转材料", ASSET, 1, False),
+    ("1421", "消耗性生物资产", ASSET, 1, False),
+    ("1501", "长期债券投资", ASSET, 1, False),
+    ("1511", "长期股权投资", ASSET, 1, False),
+    ("1601", "固定资产", ASSET, 1, True),
+    ("1602", "累计折旧", ASSET, -1, True),
+    ("1604", "在建工程", ASSET, 1, False),
+    ("1605", "工程物资", ASSET, 1, False),
+    ("1606", "固定资产清理", ASSET, 1, False),
+    ("1621", "生产性生物资产", ASSET, 1, False),
+    ("1622", "生产性生物资产累计折旧", ASSET, -1, False),
+    ("1701", "无形资产", ASSET, 1, True),
+    ("1702", "累计摊销", ASSET, -1, True),
+    ("1801", "长期待摊费用", ASSET, 1, False),
+    ("1901", "待处理财产损溢", ASSET, 1, False),
+    ("2001", "短期借款", LIABILITY, -1, False),
+    ("2201", "应付票据", LIABILITY, -1, False),
+    ("2202", "应付账款", LIABILITY, -1, True),
+    ("2203", "预收账款", LIABILITY, -1, True),
+    ("2211", "应付职工薪酬", LIABILITY, -1, True),
+    ("2221", "应交税费", LIABILITY, -1, True),
+    ("2231", "应付利息", LIABILITY, -1, False),
+    ("2232", "应付利润", LIABILITY, -1, False),
+    ("2241", "其他应付款", LIABILITY, -1, True),
+    ("2401", "递延收益", LIABILITY, -1, False),
+    ("2501", "长期借款", LIABILITY, -1, False),
+    ("2701", "长期应付款", LIABILITY, -1, False),
+    ("3001", "实收资本", EQUITY, -1, True),
+    ("3002", "资本公积", EQUITY, -1, False),
+    ("3101", "盈余公积", EQUITY, -1, False),
+    ("3103", "本年利润", EQUITY, -1, True),
+    ("3104", "利润分配", EQUITY, -1, True),
+    ("4001", "生产成本", COST, 1, False),
+    ("4101", "制造费用", COST, 1, False),
+    ("4301", "研发支出", COST, 1, True),
+    ("4401", "工程施工", COST, 1, False),
+    ("4403", "机械作业", COST, 1, False),
+    ("5001", "主营业务收入", PNL, -1, True),
+    ("5051", "其他业务收入", PNL, -1, False),
+    ("5111", "投资收益", PNL, -1, False),
+    ("5301", "营业外收入", PNL, -1, True),
+    ("5401", "主营业务成本", PNL, 1, True),
+    ("5402", "其他业务成本", PNL, 1, False),
+    ("5403", "税金及附加", PNL, 1, True),
+    ("5601", "销售费用", PNL, 1, False),
+    ("5602", "管理费用", PNL, 1, True),
+    ("5603", "财务费用", PNL, 1, True),
+    ("5711", "营业外支出", PNL, 1, True),
+    ("5801", "所得税费用", PNL, 1, True),
+]
