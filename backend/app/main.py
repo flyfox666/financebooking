@@ -1,17 +1,45 @@
+import asyncio
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
+from pathlib import Path
 
+from alembic import command
+from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import attachments, auth, books, periods, reports, system, users, vouchers
-from app.core.database import Base, engine
-from app.models import Account, Book, User
+from app.core.backup import run_backup_now
+
+BACKUP_HOUR = 3
+
+
+def run_migrations() -> None:
+    backend_root = Path(__file__).resolve().parents[1]
+    cfg = Config(str(backend_root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(backend_root / "alembic"))
+    command.upgrade(cfg, "head")
+
+
+async def backup_scheduler():
+    while True:
+        now = datetime.now()
+        target = now.replace(hour=BACKUP_HOUR, minute=0, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        await asyncio.sleep((target - now).total_seconds())
+        try:
+            await asyncio.to_thread(run_backup_now)
+        except Exception:
+            pass
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    run_migrations()
+    task = asyncio.create_task(backup_scheduler())
     yield
+    task.cancel()
 
 
 app = FastAPI(title="LedgerAI API", version="0.1.0", lifespan=lifespan)

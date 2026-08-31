@@ -10,6 +10,7 @@ venv/
 
 # 账套数据库与附件 —— 财务数据绝不进代码仓库
 backend/data/
+/data/
 
 # 密钥与环境配置（只保留 .env.example 模板）
 .env

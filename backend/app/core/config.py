@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 720
     DATABASE_URL: str = "sqlite:///./data/ledger.db"
     ATTACHMENTS_DIR: str = "./data/attachments"
+    BACKUP_DIR: str = "./data/backups"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
