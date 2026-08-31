@@ -8,7 +8,20 @@ from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import attachments, auth, books, invoices, llm, periods, reports, system, tax, users, vouchers
+from app.api import (
+    attachments,
+    ai,
+    auth,
+    books,
+    invoices,
+    llm,
+    periods,
+    reports,
+    system,
+    tax,
+    users,
+    vouchers,
+)
 from app.core.backup import run_backup_now
 from app.core.database import SessionLocal
 
@@ -72,3 +85,11 @@ app.include_router(attachments.router)
 app.include_router(invoices.router)
 app.include_router(tax.router)
 app.include_router(llm.router)
+app.include_router(ai.router)
+
+
+@app.get("/settings", include_in_schema=False)
+def settings_page():
+    from fastapi.responses import FileResponse
+
+    return FileResponse(Path(__file__).resolve().parent / "static" / "index.html")

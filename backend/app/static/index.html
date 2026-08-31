@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LedgerAI · 模型与供应商配置</title>
+<style>
+  :root { --ink:#1f2733; --muted:#5d6675; --rule:#e0ddd4; --accent:#0f766e; --accent-soft:#e6f2f0; --danger:#b91c1c; --bg:#faf9f6; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif; background:var(--bg); color:var(--ink); line-height:1.6; padding:2rem; }
+  .wrap { max-width:880px; margin:0 auto; }
+  h1 { font-size:1.4rem; margin-bottom:.4rem; }
+  .sub { color:var(--muted); font-size:.88rem; margin-bottom:1.5rem; }
+  .card { background:#fff; border:1px solid var(--rule); border-radius:10px; padding:1.2rem 1.4rem; margin-bottom:1.2rem; }
+  .card h2 { font-size:1rem; margin-bottom:.8rem; color:var(--accent); }
+  label { display:block; font-size:.82rem; color:var(--muted); margin:.5rem 0 .2rem; }
+  input, select { width:100%; padding:.5rem .7rem; border:1px solid var(--rule); border-radius:6px; font-size:.9rem; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:.8rem; }
+  .row3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:.8rem; }
+  button { padding:.5rem 1rem; border:none; border-radius:6px; background:var(--accent); color:#fff; cursor:pointer; font-size:.88rem; margin-top:.6rem; }
+  button.ghost { background:#fff; color:var(--accent); border:1px solid var(--accent); }
+  button.danger { background:var(--danger); }
+  button.small { padding:.25rem .6rem; font-size:.78rem; margin:0 .2rem; }
+  .provider { border:1px solid var(--rule); border-radius:8px; padding:.9rem 1rem; margin:.6rem 0; background:var(--bg); }
+  .provider .head { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.4rem; }
+  .provider .name { font-weight:700; }
+  .badge { font-size:.72rem; padding:.15rem .55rem; border-radius:12px; background:var(--accent-soft); color:var(--accent); font-weight:700; }
+  .badge.gray { background:#eee; color:var(--muted); }
+  .meta { font-size:.8rem; color:var(--muted); margin-top:.25rem; font-family:Consolas,monospace; }
+  .actions { margin-top:.5rem; }
+  #msg { padding:.6rem .9rem; border-radius:6px; margin-bottom:1rem; display:none; font-size:.85rem; }
+  #msg.ok { display:block; background:var(--accent-soft); color:var(--accent); }
+  #msg.err { display:block; background:#fdecec; color:var(--danger); }
+  .hidden { display:none; }
+  .result { font-size:.82rem; margin-top:.4rem; color:var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>LedgerAI · 模型与供应商配置</h1>
+  <div class="sub">支持 OpenAI 兼容协议（千问 / 方舟 / DeepSeek / 智谱）与 Anthropic 协议；Key 仅存于 NAS 数据库，页面只显示掩码。</div>
+  <div id="msg"></div>
+
+  <div class="card" id="loginCard">
+    <h2>管理员登录</h2>
+    <div class="row">
+      <div><label>用户名</label><input id="username" value="admin"></div>
+      <div><label>密码</label><input id="password" type="password"></div>
+    </div>
+    <button onclick="login()">登录并加载</button>
+    <div class="result" id="loginHint">使用系统管理员账号（页面权限：仅管理员可配置）</div>
+  </div>
+
+  <div class="card hidden" id="mainCard">
+    <h2>已配置的提供商 <button class="small ghost" onclick="load()">刷新</button></h2>
+    <div id="providerList"></div>
+
+    <h2 style="margin-top:1.2rem" id="formTitle">新增提供商</h2>
+    <input type="hidden" id="editId" value="">
+    <div class="row">
+      <div><label>名称</label><input id="f_name" placeholder="qwen-tokenplan"></div>
+      <div><label>协议</label>
+        <select id="f_protocol">
+          <option value="openai">openai（千问/方舟/DeepSeek/智谱）</option>
+          <option value="anthropic">anthropic（Claude/中转）</option>
+        </select>
+      </div>
+    </div>
+    <label>Base URL</label><input id="f_base" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1">
+    <div class="row">
+      <div><label>API Key</label><input id="f_key" placeholder="sk-...（编辑时留空表示不修改）"></div>
+      <div><label>主力模型</label><input id="f_model" placeholder="qwen3.8-flash"></div>
+    </div>
+    <div class="row3">
+      <div><label>视觉模型（可选）</label><input id="f_vision" placeholder="qwen3.8-max"></div>
+      <div><label style="margin-top:1.6rem"><input type="checkbox" id="f_default"> 设为默认</label></div>
+      <div style="align-self:end"><button onclick="save()">保存</button> <button class="ghost" onclick="resetForm()">清空表单</button></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let TOKEN = null;
+
+function msg(text, ok) {
+  const el = document.getElementById('msg');
+  el.textContent = text;
+  el.className = ok ? 'ok' : 'err';
+}
+
+async function api(path, options = {}) {
+  const resp = await fetch(path, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN, ...(options.headers || {}) },
+  });
+  if (resp.status === 401) { msg('登录已失效，请重新登录', false); throw new Error('401'); }
+  if (!resp.ok && resp.status !== 204) {
+    const detail = await resp.json().catch(() => ({}));
+    throw new Error(detail.detail || ('HTTP ' + resp.status));
+  }
+  return resp.status === 204 ? null : resp.json();
+}
+
+async function login() {
+  const username = document.getElementById('username').value;
+  const password = document.getElementById('password').value;
+  try {
+    const resp = await fetch('/api/auth/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    if (!resp.ok) throw new Error((await resp.json()).detail || '登录失败');
+    TOKEN = (await resp.json()).access_token;
+    document.getElementById('loginCard').classList.add('hidden');
+    document.getElementById('mainCard').classList.remove('hidden');
+    msg('登录成功', true);
+    load();
+  } catch (e) { msg('登录失败：' + e.message, false); }
+}
+
+async function load() {
+  try {
+    const list = await api('/api/llm/providers');
+    const box = document.getElementById('providerList');
+    box.innerHTML = '';
+    for (const p of list) {
+      const div = document.createElement('div');
+      div.className = 'provider';
+      div.innerHTML = `
+        <div class="head">
+          <span class="name">${p.name} ${p.is_default ? '<span class="badge">默认</span>' : '<span class="badge gray">备用</span>'}${p.enabled ? '' : '<span class="badge gray">已停用</span>'}</span>
+          <span>
+            <button class="small" onclick="makeDefault(${p.id})">设为默认</button>
+            <button class="small ghost" onclick="testProvider(${p.id}, this)">测试连通</button>
+            <button class="small ghost" onclick="editProvider(${p.id})">编辑</button>
+            <button class="small ghost" onclick="toggle(${p.id}, ${p.enabled})">${p.enabled ? '停用' : '启用'}</button>
+            <button class="small danger" onclick="del(${p.id})">删除</button>
+          </span>
+        </div>
+        <div class="meta">${p.protocol.toUpperCase()} · ${p.model}${p.vision_model ? ' · 视觉:' + p.vision_model : ''} · Key ${p.key_masked}</div>
+        <div class="meta">${p.base_url}</div>
+        <div class="result" id="test-${p.id}"></div>`;
+      box.appendChild(div);
+    }
+    if (!list.length) box.innerHTML = '<div class="result">暂无提供商，请在下方新增。</div>';
+  } catch (e) { msg('加载失败：' + e.message, false); }
+}
+
+function resetForm() {
+  document.getElementById('editId').value = '';
+  document.getElementById('formTitle').textContent = '新增提供商';
+  ['f_name', 'f_base', 'f_key', 'f_model', 'f_vision'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('f_default').checked = false;
+}
+
+async function save() {
+  const editId = document.getElementById('editId').value;
+  const body = {
+    name: document.getElementById('f_name').value.trim(),
+    protocol: document.getElementById('f_protocol').value,
+    base_url: document.getElementById('f_base').value.trim(),
+    model: document.getElementById('f_model').value.trim(),
+    vision_model: document.getElementById('f_vision').value.trim() || null,
+    is_default: document.getElementById('f_default').checked,
+  };
+  const key = document.getElementById('f_key').value.trim();
+  try {
+    if (editId) {
+      if (key) body.api_key = key;
+      await api('/api/llm/providers/' + editId, { method: 'PATCH', body: JSON.stringify(body) });
+      msg('已更新', true);
+    } else {
+      body.api_key = key;
+      const created = await api('/api/llm/providers', { method: 'POST', body: JSON.stringify(body) });
+      msg('已创建', true);
+      if (body.is_default) await api(`/api/llm/providers/${created.id}/default`, { method: 'POST' });
+    }
+    resetForm(); load();
+  } catch (e) { msg('保存失败：' + e.message, false); }
+}
+
+async function editProvider(id) {
+  const list = await api('/api/llm/providers');
+  const p = list.find(x => x.id === id);
+  document.getElementById('editId').value = id;
+  document.getElementById('formTitle').textContent = '编辑提供商：' + p.name + '（Key 留空则不修改）';
+  document.getElementById('f_name').value = p.name;
+  document.getElementById('f_protocol').value = p.protocol;
+  document.getElementById('f_base').value = p.base_url;
+  document.getElementById('f_model').value = p.model;
+  document.getElementById('f_vision').value = p.vision_model || '';
+  document.getElementById('f_default').checked = p.is_default;
+  document.getElementById('f_key').value = '';
+  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+}
+
+async function makeDefault(id) {
+  try { await api(`/api/llm/providers/${id}/default`, { method: 'POST' }); msg('已设为默认', true); load(); }
+  catch (e) { msg('操作失败：' + e.message, false); }
+}
+
+async function toggle(id, enabled) {
+  try { await api('/api/llm/providers/' + id, { method: 'PATCH', body: JSON.stringify({ enabled: !enabled }) }); load(); }
+  catch (e) { msg('操作失败：' + e.message, false); }
+}
+
+async function del(id) {
+  if (!confirm('确定删除该提供商？')) return;
+  try { await api('/api/llm/providers/' + id, { method: 'DELETE' }); msg('已删除', true); load(); }
+  catch (e) { msg('删除失败：' + e.message, false); }
+}
+
+async function testProvider(id) {
+  const el = document.getElementById('test-' + id);
+  el.textContent = '测试中…';
+  try {
+    const r = await api(`/api/llm/providers/${id}/test`, { method: 'POST' });
+    el.textContent = r.ok ? `✅ 连通（${r.model}）：${r.reply}` : `❌ 失败：${r.error}`;
+  } catch (e) { el.textContent = '❌ ' + e.message; }
+}
+</script>
+</body>
+</html>

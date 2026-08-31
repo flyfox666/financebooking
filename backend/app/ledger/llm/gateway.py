@@ -31,7 +31,9 @@ def _resolve_provider(db: Session, provider_id: int | None = None) -> LLMProvide
         select(LLMProvider).where(LLMProvider.is_default.is_(True), LLMProvider.enabled.is_(True))
     )
     if provider is None:
-        provider = db.scalar(select(LLMProvider).where(LLMProvider.enabled.is_(True)).order_by(LLMProvider.id))
+        provider = db.scalar(
+            select(LLMProvider).where(LLMProvider.enabled.is_(True)).order_by(LLMProvider.id)
+        )
     if provider is None:
         raise LLMError("尚未配置任何可用的大模型服务")
     return provider
@@ -87,8 +89,10 @@ def _to_anthropic_messages(messages: list[dict]) -> tuple[str, list[dict]]:
     return "\n".join(system_parts), converted
 
 
-def _chat_openai(provider: LLMProvider, messages: list[dict], json_mode: bool, max_tokens: int, timeout: float) -> dict:
-    payload: dict = {"model": provider.model, "messages": messages, "max_tokens": max_tokens}
+def _chat_openai(
+    provider: LLMProvider, model: str, messages: list[dict], json_mode: bool, max_tokens: int, timeout: float
+) -> dict:
+    payload: dict = {"model": model, "messages": messages, "max_tokens": max_tokens}
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
     data = _http_post(
@@ -101,12 +105,14 @@ def _chat_openai(provider: LLMProvider, messages: list[dict], json_mode: bool, m
     return {"content": content, "usage": data.get("usage", {})}
 
 
-def _chat_anthropic(provider: LLMProvider, messages: list[dict], json_mode: bool, max_tokens: int, timeout: float) -> dict:
+def _chat_anthropic(
+    provider: LLMProvider, model: str, messages: list[dict], json_mode: bool, max_tokens: int, timeout: float
+) -> dict:
     system, converted = _to_anthropic_messages(messages)
     if json_mode and converted:
         last = converted[-1]["content"]
         last.append({"type": "text", "text": "只输出一个合法的 JSON 对象，不要有任何其他文字。"})
-    payload: dict = {"model": provider.model, "max_tokens": max_tokens, "messages": converted}
+    payload: dict = {"model": model, "max_tokens": max_tokens, "messages": converted}
     if system:
         payload["system"] = system
     data = _http_post(
@@ -126,12 +132,39 @@ def chat(
     provider_id: int | None = None,
     json_mode: bool = False,
     max_tokens: int = 2048,
+    model_override: str | None = None,
 ) -> dict:
     provider = _resolve_provider(db, provider_id)
+    model = model_override or provider.model
     timeout = float(get_settings().LLM_TIMEOUT_SECONDS)
     if provider.protocol == "anthropic":
-        return _chat_anthropic(provider, messages, json_mode, max_tokens, timeout)
-    return _chat_openai(provider, messages, json_mode, max_tokens, timeout)
+        return _chat_anthropic(provider, model, messages, json_mode, max_tokens, timeout)
+    return _chat_openai(provider, model, messages, json_mode, max_tokens, timeout)
+
+
+def chat_vision(
+    db: Session,
+    *,
+    text: str,
+    image_data_url: str,
+    provider_id: int | None = None,
+    json_mode: bool = True,
+    max_tokens: int = 2048,
+) -> dict:
+    provider = _resolve_provider(db, provider_id)
+    model = provider.vision_model or provider.model
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": text},
+                {"type": "image_url", "image_url": {"url": image_data_url}},
+            ],
+        }
+    ]
+    if provider.protocol == "anthropic":
+        return _chat_anthropic(provider, model, messages, json_mode, max_tokens, float(get_settings().LLM_TIMEOUT_SECONDS))
+    return _chat_openai(provider, model, messages, json_mode, max_tokens, float(get_settings().LLM_TIMEOUT_SECONDS))
 
 
 def test_provider(db: Session, provider_id: int) -> dict:

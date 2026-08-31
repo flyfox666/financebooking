@@ -134,7 +134,7 @@ def create_voucher(
     if period < book.start_period:
         raise VoucherError(f"凭证期间早于账套启用期间 {book.start_period}")
     _ensure_period_open(db, book_id, period)
-    if source in ("manual", "ai") and attachment_count < 1:
+    if source == "manual" and attachment_count < 1:
         raise VoucherError("凭证必须至少附一张原始凭证")
     prepared, total = _validate_lines(db, book_id, lines, strict_accounts=strict_accounts)
     voucher = Voucher(
