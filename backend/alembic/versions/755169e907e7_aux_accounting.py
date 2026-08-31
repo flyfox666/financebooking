@@ -36,7 +36,7 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_contact_book_id'), ['book_id'], unique=False)
 
     with op.batch_alter_table('account', schema=None) as batch_op:
-        batch_op.add_column(sa.Column('aux_types', sa.String(length=64), nullable=False))
+        batch_op.add_column(sa.Column('aux_types', sa.String(length=64), nullable=False, server_default=''))
 
     with op.batch_alter_table('voucher_line', schema=None) as batch_op:
         batch_op.add_column(sa.Column('contact_id', sa.Integer(), nullable=True))
