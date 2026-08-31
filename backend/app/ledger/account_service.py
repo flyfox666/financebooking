@@ -118,6 +118,7 @@ def get_account_tree(db: Session, *, book_id: int, only_active: bool = True) -> 
             "is_active": a.is_active,
             "is_leaf": a.is_leaf,
             "is_preset": a.is_preset,
+            "aux_types": a.aux_types or "",
             "children": [],
         }
     for a in accounts:

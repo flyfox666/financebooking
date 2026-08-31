@@ -19,3 +19,4 @@ class Account(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_leaf: Mapped[bool] = mapped_column(Boolean, default=True)
     is_preset: Mapped[bool] = mapped_column(Boolean, default=False)
+    aux_types: Mapped[str] = mapped_column(String(64), default="")

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.ledger.exceptions import BookError, VoucherError
 from app.models.account import Account
 from app.models.book import Book
+from app.models.contact import Contact
 from app.models.report import PeriodClose
 from app.models.user import User
 from app.models.voucher import Voucher, VoucherLine
@@ -90,11 +91,22 @@ def _validate_lines(
         )
         if account is None:
             raise VoucherError(f"第 {idx} 行科目 {account_code} 不存在")
+        contact_id = raw.get("contact_id") or None
         if strict_accounts:
             if not account.is_active:
                 raise VoucherError(f"科目 {account_code} 已停用，不能在新凭证中使用")
             if not account.is_leaf:
                 raise VoucherError(f"科目 {account_code} 存在下级明细，请使用明细科目")
+        if "contact" in (account.aux_types or ""):
+            if not contact_id:
+                raise VoucherError(f"第 {idx} 行科目 {account_code} 启用了往来辅助核算，必须选择往来单位")
+            contact = db.get(Contact, int(contact_id))
+            if contact is None or contact.book_id != book_id or not contact.is_active:
+                raise VoucherError(f"第 {idx} 行往来单位不存在或已停用")
+        elif contact_id:
+            contact = db.get(Contact, int(contact_id))
+            if contact is None or contact.book_id != book_id:
+                raise VoucherError(f"第 {idx} 行往来单位不存在")
         prepared.append(
             {
                 "line_no": idx,
@@ -102,6 +114,7 @@ def _validate_lines(
                 "account_code": account_code,
                 "debit": debit,
                 "credit": credit,
+                "contact_id": int(contact_id) if contact_id else None,
             }
         )
         total_debit += debit

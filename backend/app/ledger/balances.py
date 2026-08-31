@@ -119,44 +119,117 @@ def _with_parent_rollups_gross(
     return merged
 
 
-def trial_balance(db: Session, *, book_id: int, period: str) -> dict:
+def _interleave(parent_rows: list[dict], leaf_rows: list[dict]) -> list[dict]:
+    children: dict[str, list[dict]] = {}
+    for row in leaf_rows:
+        prefix = row["account_code"][:4]
+        children.setdefault(prefix, []).append(row)
+    result = []
+    used = set()
+    for parent in parent_rows:
+        result.append(parent)
+        for child in children.get(parent["account_code"], []):
+            result.append(child)
+            used.add(child["account_code"])
+    for row in leaf_rows:
+        if row["account_code"] not in used:
+            result.append(row)
+    return result
+
+
+def trial_balance(db: Session, *, book_id: int, period: str, complete: bool = False) -> dict:
     from app.models.book import Book
 
     book = db.get(Book, book_id)
     opening = opening_nets(db, book_id, before_period=period)
     sums = gross_sums(db, book_id, period, period)
-    rows = []
-    totals = {
-        "opening_debit": ZERO, "opening_credit": ZERO,
-        "period_debit": ZERO, "period_credit": ZERO,
-        "closing_debit": ZERO, "closing_credit": ZERO,
-    }
-    for account in leaf_accounts(db, book_id):
+
+    opening_rollup = {code: ZERO for code in sums}
+    for code, net in opening.items():
+        opening_rollup[code] = opening_rollup.get(code, ZERO) + net
+
+    leaves = leaf_accounts(db, book_id)
+
+    def leaf_row(account):
         o_net = opening.get(account.code, ZERO)
         o_dr, o_cr = _split(o_net)
         p_dr, p_cr = sums.get(account.code, [ZERO, ZERO])
         c_net = o_net + p_dr - p_cr
         c_dr, c_cr = _split(c_net)
-        rows.append(
-            {
-                "account_code": account.code,
-                "account_name": account.name,
-                "direction": account.direction,
-                "is_active": account.is_active,
-                "opening_debit": fmt_amount(o_dr),
-                "opening_credit": fmt_amount(o_cr),
-                "period_debit": fmt_amount(p_dr),
-                "period_credit": fmt_amount(p_cr),
-                "closing_debit": fmt_amount(c_dr),
-                "closing_credit": fmt_amount(c_cr),
-            }
-        )
-        totals["opening_debit"] += o_dr
-        totals["opening_credit"] += o_cr
-        totals["period_debit"] += p_dr
-        totals["period_credit"] += p_cr
-        totals["closing_debit"] += c_dr
-        totals["closing_credit"] += c_cr
+        return {
+            "account_code": account.code,
+            "account_name": account.name,
+            "direction": account.direction,
+            "is_active": account.is_active,
+            "level": account.level,
+            "parent_code": account.parent_code,
+            "has_aux": bool(account.aux_types),
+            "opening_debit": fmt_amount(o_dr),
+            "opening_credit": fmt_amount(o_cr),
+            "period_debit": fmt_amount(p_dr),
+            "period_credit": fmt_amount(p_cr),
+            "closing_debit": fmt_amount(c_dr),
+            "closing_credit": fmt_amount(c_cr),
+        }
+
+    rows = [leaf_row(account) for account in leaves]
+
+    if complete:
+        leaf_opening: dict[str, Decimal] = {}
+        for account in leaves:
+            leaf_opening[account.code] = opening.get(account.code, ZERO)
+        merged_sums = _with_parent_rollups_gross(db, book_id, sums)
+        merged_opening: dict[str, Decimal] = dict(leaf_opening)
+        for leaf in leaves:
+            prefix = leaf.code[:4]
+            if prefix != prefix or len(prefix) == 4:
+                merged_opening[prefix] = merged_opening.get(prefix, ZERO) + leaf_opening.get(leaf.code, ZERO)
+        parents = db.scalars(
+            select(Account)
+            .where(Account.book_id == book_id, Account.level == 1)
+            .order_by(Account.code)
+        ).all()
+        parent_rows = []
+        for account in parents:
+            o_net = merged_opening.get(account.code, ZERO)
+            o_dr, o_cr = _split(o_net)
+            p_dr, p_cr = merged_sums.get(account.code, [ZERO, ZERO])
+            c_net = o_net + p_dr - p_cr
+            c_dr, c_cr = _split(c_net)
+            parent_rows.append(
+                {
+                    "account_code": account.code,
+                    "account_name": account.name,
+                    "direction": account.direction,
+                    "is_active": account.is_active,
+                    "level": 1,
+                    "parent_code": None,
+                    "has_aux": bool(account.aux_types),
+                    "is_rollup": True,
+                    "opening_debit": fmt_amount(o_dr),
+                    "opening_credit": fmt_amount(o_cr),
+                    "period_debit": fmt_amount(p_dr),
+                    "period_credit": fmt_amount(p_cr),
+                    "closing_debit": fmt_amount(c_dr),
+                    "closing_credit": fmt_amount(c_cr),
+                }
+            )
+        rows = _interleave(parent_rows, rows)
+
+    totals = {
+        "opening_debit": ZERO, "opening_credit": ZERO,
+        "period_debit": ZERO, "period_credit": ZERO,
+        "closing_debit": ZERO, "closing_credit": ZERO,
+    }
+    for row in rows:
+        if row.get("is_rollup"):
+            continue
+        totals["opening_debit"] += Decimal(row["opening_debit"])
+        totals["opening_credit"] += Decimal(row["opening_credit"])
+        totals["period_debit"] += Decimal(row["period_debit"])
+        totals["period_credit"] += Decimal(row["period_credit"])
+        totals["closing_debit"] += Decimal(row["closing_debit"])
+        totals["closing_credit"] += Decimal(row["closing_credit"])
     formatted_totals = {key: fmt_amount(value) for key, value in totals.items()}
     is_balanced = (
         totals["opening_debit"] == totals["opening_credit"]

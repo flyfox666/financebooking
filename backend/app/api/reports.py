@@ -12,9 +12,26 @@ router = APIRouter(prefix="/api/reports", tags=["reports"])
 
 @router.get("/trial-balance")
 def get_trial_balance(
-    book_id: int, period: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+    book_id: int,
+    period: str,
+    complete: bool = False,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    return balances.trial_balance(db, book_id=book_id, period=period)
+    return balances.trial_balance(db, book_id=book_id, period=period, complete=complete)
+
+
+@router.get("/aux-balance")
+def get_aux_balance(
+    book_id: int,
+    period: str,
+    account_code: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    from app.ledger.aux_service import aux_trial_balance
+
+    return aux_trial_balance(db, book_id=book_id, period=period, account_code=account_code)
 
 
 @router.get("/general-ledger")

@@ -12,6 +12,7 @@ class AccountOut(BaseModel):
     is_active: bool
     is_leaf: bool
     is_preset: bool
+    aux_types: str = ""
 
     model_config = {"from_attributes": True}
 

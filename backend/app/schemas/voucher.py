@@ -38,6 +38,7 @@ class VoucherLineOut(BaseModel):
     account_code: str
     debit: Decimal
     credit: Decimal
+    contact_id: int | None = None
 
     @field_serializer("debit", "credit")
     def ser_amount(self, value: Decimal, _info) -> str:

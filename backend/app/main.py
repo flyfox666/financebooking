@@ -13,6 +13,7 @@ from app.api import (
     ai,
     auth,
     books,
+    contacts,
     invoices,
     llm,
     periods,
@@ -78,6 +79,7 @@ app.include_router(system.router)
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(books.router)
+app.include_router(contacts.router)
 app.include_router(vouchers.router)
 app.include_router(periods.router)
 app.include_router(reports.router)

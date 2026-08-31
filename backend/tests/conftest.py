@@ -34,7 +34,10 @@ def db_session(engine):
 
 
 @pytest.fixture()
-def client(engine, db_session):
+def client(engine, db_session, monkeypatch):
+    monkeypatch.setattr("app.main.run_migrations", lambda: None)
+    monkeypatch.setattr("app.main.seed_llm_provider", lambda: None)
+
     def override_get_db():
         yield db_session
 

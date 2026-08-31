@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_admin
 from app.core.database import get_db
-from app.ledger import account_service, book_service
+from app.ledger import account_service, aux_service, book_service
 from app.ledger.exceptions import LedgerError
 from app.models.book import Book
 from app.models.user import User
@@ -130,3 +130,23 @@ def patch_account(
     except LedgerError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return account
+
+
+@router.patch("/accounts/{code}/aux")
+def patch_account_aux(
+    code: str,
+    book_id: int,
+    aux_types: str = "",
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    requested = [item for item in (aux_types or "").split(",") if item]
+    try:
+        account = aux_service.set_aux_types(db, book_id=book_id, code=code, aux_types=requested)
+    except LedgerError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {
+        "code": account.code,
+        "name": account.name,
+        "aux_types": [item for item in (account.aux_types or "").split(",") if item],
+    }
