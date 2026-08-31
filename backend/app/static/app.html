@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LedgerAI 智账 · 主界面</title>
+<style>
+  :root { --ink:#1f2733; --muted:#5d6675; --rule:#e0ddd4; --accent:#0f766e; --soft:#e6f2f0; --danger:#b91c1c; --amber:#b45309; --amber-soft:#fbf0e2; --bg:#faf9f6; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif; background:var(--bg); color:var(--ink); font-size:14px; }
+  .hidden { display:none !important; }
+  .layout { display:grid; grid-template-columns:150px 1fr 230px; height:100vh; }
+  .topbar { grid-column:1/4; display:flex; align-items:center; gap:1rem; padding:.5rem 1rem; background:#fff; border-bottom:2px solid var(--ink); }
+  .topbar .brand { font-weight:700; color:var(--accent); }
+  .topbar select, .topbar input { padding:.25rem .5rem; border:1px solid var(--rule); border-radius:6px; }
+  .topbar .spacer { flex:1; }
+  .side { border-right:1px solid var(--rule); background:#fff; padding:.6rem .4rem; }
+  .side div { padding:.55rem .8rem; border-radius:8px; cursor:pointer; margin-bottom:.15rem; }
+  .side div:hover { background:var(--soft); }
+  .side div.active { background:var(--soft); color:var(--accent); font-weight:700; }
+  .main { overflow-y:auto; padding:1rem 1.2rem; }
+  .rpanel { border-left:1px solid var(--rule); background:#fff; padding:.8rem; overflow-y:auto; }
+  .rpanel h4 { font-size:.8rem; color:var(--accent); margin:.6rem 0 .3rem; }
+  .rpanel .kv { display:flex; justify-content:space-between; font-size:.8rem; padding:.15rem 0; }
+  .rpanel .remind { background:var(--amber-soft); border-radius:6px; padding:.4rem .5rem; font-size:.75rem; margin-bottom:.3rem; }
+  .card { background:#fff; border:1px solid var(--rule); border-radius:10px; padding:.8rem 1rem; margin-bottom:.8rem; }
+  .bubble { max-width:88%; margin-bottom:.7rem; padding:.55rem .8rem; border-radius:10px; white-space:pre-wrap; font-size:.88rem; }
+  .bubble.user { background:var(--soft); margin-left:auto; }
+  .bubble.ai { background:#fff; border:1px solid var(--rule); }
+  .bubble .warn { background:var(--amber-soft); color:var(--amber); border-radius:6px; padding:.25rem .5rem; margin:.25rem 0; font-size:.8rem; }
+  table { width:100%; border-collapse:collapse; font-size:.82rem; background:#fff; }
+  th { background:var(--ink); color:#fff; padding:.4rem .5rem; text-align:left; white-space:nowrap; }
+  td { padding:.35rem .5rem; border-bottom:1px solid var(--rule); }
+  tr:last-child td { border-bottom:none; }
+  td.num, th.num { text-align:right; font-family:Consolas,monospace; }
+  .total-row td { font-weight:700; background:var(--soft); }
+  input, select, textarea { padding:.35rem .5rem; border:1px solid var(--rule); border-radius:6px; font-size:.85rem; }
+  button { padding:.4rem .9rem; border:none; border-radius:6px; background:var(--accent); color:#fff; cursor:pointer; font-size:.85rem; }
+  button.ghost { background:#fff; color:var(--accent); border:1px solid var(--accent); }
+  button.danger { background:var(--danger); }
+  button:disabled { background:#ccc; cursor:not-allowed; }
+  .vc-line { display:grid; grid-template-columns:1fr 150px 110px 110px 30px; gap:.4rem; margin-bottom:.35rem; align-items:center; }
+  .vc-totals { display:flex; gap:1.2rem; justify-content:flex-end; font-family:Consolas,monospace; font-size:.85rem; padding:.4rem 0; }
+  .diff-bad { color:var(--danger); font-weight:700; }
+  .diff-ok { color:var(--accent); font-weight:700; }
+  .chips { display:flex; gap:.4rem; flex-wrap:wrap; margin:.4rem 0; }
+  .chip { background:#fff; border:1px solid var(--rule); border-radius:14px; padding:.2rem .7rem; font-size:.78rem; cursor:pointer; }
+  .chip:hover { border-color:var(--accent); color:var(--accent); }
+  #loginView { max-width:360px; margin:12vh auto; }
+  #loginView input { width:100%; margin-bottom:.7rem; }
+  .inputbar { display:flex; gap:.5rem; align-items:center; background:#fff; border:1px solid var(--rule); border-radius:10px; padding:.5rem; position:sticky; bottom:.5rem; }
+  .inputbar input[type=text] { flex:1; border:none; outline:none; }
+  .badge { font-size:.72rem; padding:.1rem .5rem; border-radius:10px; background:var(--soft); color:var(--accent); font-weight:700; }
+  .badge.gray { background:#eee; color:var(--muted); }
+  h3.view-title { margin-bottom:.8rem; }
+</style>
+</head>
+<body>
+
+<div id="loginView" class="card">
+  <h3 style="margin-bottom:.8rem">LedgerAI 智账 · 登录</h3>
+  <input id="l_user" placeholder="用户名" value="admin">
+  <input id="l_pass" type="password" placeholder="密码">
+  <button style="width:100%" onclick="login()">登录</button>
+  <div id="l_err" style="color:var(--danger);font-size:.82rem;margin-top:.5rem"></div>
+</div>
+
+<div class="layout hidden" id="mainView">
+  <div class="topbar">
+    <span class="brand">智账 LedgerAI</span>
+    <span id="bookName" class="badge">…</span>
+    <span>期间 <input type="month" id="period" onchange="onPeriodChange()"></span>
+    <span class="spacer"></span>
+    <span id="whoami" class="badge gray"></span>
+    <button class="ghost" onclick="logout()">退出</button>
+  </div>
+
+  <div class="side" id="sideNav">
+    <div class="active" data-view="chat">💬 对话记账</div>
+    <div data-view="vouchers">📋 凭证</div>
+    <div data-view="tb">📊 科目余额表</div>
+    <div data-view="is">📈 利润表</div>
+    <div data-view="bs">📉 资产负债表</div>
+    <div data-view="invoices">🧾 发票</div>
+    <div data-view="tax">💰 报税</div>
+    <div data-view="llm">🤖 模型设置</div>
+  </div>
+
+  <div class="main" id="mainArea"></div>
+
+  <div class="rpanel">
+    <h4>⏰ 征期提醒（30 天内）</h4>
+    <div id="rp_reminders"><div class="result">…</div></div>
+    <h4>💡 本期概要</h4>
+    <div id="rp_summary">…</div>
+  </div>
+</div>
+
+<script>
+let TOKEN = localStorage.getItem('ledger_token') || '';
+let ROLE = localStorage.getItem('ledger_role') || '';
+let BOOK = { id: 1, name: '' };
+let PERIOD = new Date().toISOString().slice(0, 7);
+let ACCOUNTS = [];
+let currentView = 'chat';
+let chatLog = [];
+
+const $ = id => document.getElementById(id);
+
+async function api(path, options = {}) {
+  const resp = await fetch(path, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN, ...(options.headers || {}) },
+  });
+  if (resp.status === 401) { logout(true); throw new Error('登录已失效'); }
+  if (resp.status === 204) return null;
+  if (!resp.ok) {
+    const detail = await resp.json().catch(() => ({}));
+    throw new Error(detail.detail || ('HTTP ' + resp.status));
+  }
+  return resp.json();
+}
+
+function logout(expired) {
+  localStorage.removeItem('ledger_token');
+  TOKEN = '';
+  $('mainView').classList.add('hidden');
+  $('loginView').classList.remove('hidden');
+  if (expired) $('l_err').textContent = '登录已失效，请重新登录';
+}
+
+async function login() {
+  try {
+    const resp = await fetch('/api/auth/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: $('l_user').value, password: $('l_pass').value }),
+    });
+    if (!resp.ok) throw new Error((await resp.json()).detail || '登录失败');
+    TOKEN = (await resp.json()).access_token;
+    localStorage.setItem('ledger_token', TOKEN);
+    await boot();
+  } catch (e) { $('l_err').textContent = e.message; }
+}
+
+async function boot() {
+  const me = await api('/api/auth/me');
+  ROLE = me.role;
+  localStorage.setItem('ledger_role', ROLE);
+  $('whoami').textContent = `${me.display_name || me.username}（${{admin:'管理员',bookkeeper:'制单',auditor:'审核'}[me.role] || me.role}）`;
+  try {
+    BOOK = await api('/api/books/1');
+  } catch (e) {
+    $('bookName').textContent = '未找到账套';
+    alert('未找到账套，请先在容器中执行 scripts/init_dev_db.py 初始化');
+    return;
+  }
+  $('bookName').textContent = BOOK.name;
+  $('period').value = PERIOD;
+  $('loginView').classList.add('hidden');
+  $('mainView').classList.remove('hidden');
+  ACCOUNTS = await api(`/api/accounts?book_id=${BOOK.id}`);
+  await Promise.all([loadReminders(), loadSummary()]);
+  switchView('chat');
+}
+
+function onPeriodChange() { PERIOD = $('period').value; loadSummary(); if (currentView !== 'chat') switchView(currentView); }
+
+function switchView(view) {
+  currentView = view;
+  document.querySelectorAll('#sideNav div').forEach(el => el.classList.toggle('active', el.dataset.view === view));
+  const main = $('mainArea');
+  if (view === 'llm') { window.open('/settings', '_blank'); return; }
+  ({ chat: renderChat, vouchers: renderVouchers, tb: renderTB, is: renderIS, bs: renderBS, invoices: renderInvoices, tax: renderTax })[view]();
+}
+
+function addBubble(html, cls = 'ai') {
+  chatLog.push({ html, cls });
+  const wrap = document.createElement('div');
+  wrap.className = 'bubble ' + cls;
+  wrap.innerHTML = html;
+  $('chatFlow').appendChild(wrap);
+  $('chatFlow').parentElement.scrollTop = $('chatFlow').parentElement.scrollHeight;
+}
+
+/* ---------- 对话视图 ---------- */
+function renderChat() {
+  $('mainArea').innerHTML = `
+    <div id="chatFlow" style="height:calc(100vh - 190px); overflow-y:auto; padding-right:.3rem"></div>
+    <div class="chips" id="chips"></div>
+    <div class="inputbar">
+      <input type="file" id="chatFile" class="hidden">
+      <button class="ghost" onclick="$('chatFile').click()" title="上传单据">📎</button>
+      <input type="text" id="chatInput" placeholder="输入业务描述，或拖入单据文件（回车发送）" onkeydown="if(event.key==='Enter')send()">
+      <button class="ghost" onclick="newManualCard()">＋ 新增凭证</button>
+      <button onclick="send()">发送</button>
+    </div>`;
+  const flow = $('chatFlow');
+  chatLog.forEach(m => {
+    const div = document.createElement('div');
+    div.className = 'bubble ' + m.cls;
+    div.innerHTML = m.html;
+    flow.appendChild(div);
+  });
+  flow.scrollTop = flow.scrollHeight;
+  $('chips').innerHTML = '';
+  ['本月收入多少', '本月费用有哪些', '这个月利润', '看看余额表'].forEach(q => {
+    const c = document.createElement('span');
+    c.className = 'chip'; c.textContent = q;
+    c.onclick = () => { $('chatInput').value = q; send(); };
+    $('chips').appendChild(c);
+  });
+  $('chatFile').onchange = () => { if ($('chatFile').files[0]) send(); };
+}
+
+function cardHTML(v, mode) {
+  const rows = (v.lines || []).map((line, i) => `
+    <div class="vc-line">
+      <input value="${line.summary || ''}" placeholder="摘要" onchange="updLine(${i},'summary',this.value)">
+      <select onchange="updLine(${i},'account_code',this.value)">
+        <option value="">选择科目</option>
+        ${ACCOUNTS.filter(a => a.is_active && a.is_leaf).map(a =>
+          `<option value="${a.code}" ${a.code === line.account_code ? 'selected' : ''}>${a.code} ${a.name}</option>`).join('')}
+      </select>
+      <input class="num" value="${line.debit || ''}" placeholder="借方" onchange="updLine(${i},'debit',this.value)">
+      <input class="num" value="${line.credit || ''}" placeholder="贷方" onchange="updLine(${i},'credit',this.value)">
+      <button class="small danger" onclick="delLine(${i})">×</button>
+    </div>`).join('');
+  const total = v.lines.reduce((acc, l) => acc + (parseFloat(l.debit) || 0), 0);
+  const diff = (v.lines.reduce((acc, l) => acc + (parseFloat(l.debit) || 0) - (parseFloat(l.credit) || 0), 0)).toFixed(2);
+  const diffCls = Math.abs(diff) < 0.005 ? 'diff-ok' : 'diff-bad';
+  return `
+    <div class="card" id="vcCard">
+      <div style="display:flex;gap:.8rem;align-items:center;margin-bottom:.5rem">
+        <b>凭证日期</b><input type="date" id="vc_date" value="${v.voucher_date}">
+        <b>附单据数</b><input id="vc_att" type="number" min="0" value="${v.attachment_count ?? 1}" style="width:60px">
+        <span class="badge ${mode === 'ai' ? '' : 'gray'}">${mode === 'ai' ? 'AI 生成 · 可编辑' : '手工录入'}</span>
+      </div>
+      <div class="vc-line" style="font-weight:700;color:var(--muted)"><span>摘要</span><span>科目</span><span style="text-align:right">借方</span><span style="text-align:right">贷方</span><span></span></div>
+      ${rows}
+      <button class="small ghost" onclick="addLine()">＋ 加一行</button>
+      <div class="vc-totals">
+        <span>借方合计 ${total.toFixed(2)}</span>
+        <span>贷方合计 ${total.toFixed(2)}</span>
+        <span class="${diffCls}">差额 ${diff}</span>
+      </div>
+      <div id="vc_err" style="color:var(--danger);font-size:.82rem"></div>
+      <button id="vc_confirm" onclick="confirmCard('${mode}')" ${Math.abs(diff) >= 0.005 ? 'disabled' : ''}>确认落账</button>
+      ${mode === 'ai' ? `<button class="ghost" onclick="reSuggest()">重新生成</button>` : ''}
+    </div>`;
+}
+
+let cardState = { mode: 'ai', voucher: null, docId: null };
+
+function showCard(mode, voucher, docId) {
+  cardState = { mode, voucher, docId };
+  addBubble(cardHTML(voucher, mode));
+}
+
+function updLine(i, field, value) { cardState.voucher.lines[i][field] = value; refreshCardTotals(); }
+function addLine() { cardState.voucher.lines.push({ summary: '', account_code: '', debit: '', credit: '' }); rerenderCard(); }
+function delLine(i) { cardState.voucher.lines.splice(i, 1); rerenderCard(); }
+function rerenderCard() {
+  const flow = $('chatFlow');
+  const card = document.getElementById('vcCard');
+  if (card) { card.outerHTML = cardHTML(cardState.voucher, cardState.mode); flow.scrollTop = flow.scrollHeight; }
+}
+function refreshCardTotals() {
+  const card = document.getElementById('vcCard');
+  if (!card) return;
+  const v = cardState.voucher;
+  const total = v.lines.reduce((acc, l) => acc + (parseFloat(l.debit) || 0), 0);
+  const diff = (v.lines.reduce((acc, l) => acc + (parseFloat(l.debit) || 0) - (parseFloat(l.credit) || 0), 0)).toFixed(2);
+  const ok = Math.abs(diff) < 0.005;
+  card.querySelector('.vc-totals').innerHTML = `<span>借方合计 ${total.toFixed(2)}</span><span>贷方合计 ${total.toFixed(2)}</span><span class="${ok ? 'diff-ok' : 'diff-bad'}">差额 ${diff}</span>`;
+  card.querySelector('#vc_confirm').disabled = !ok;
+}
+
+function newManualCard() {
+  showCard('manual', {
+    voucher_date: new Date().toISOString().slice(0, 10),
+    lines: [{ summary: '', account_code: '', debit: '', credit: '' }, { summary: '', account_code: '', debit: '', credit: '' }],
+    attachment_count: 1,
+  });
+  if (currentView !== 'chat') switchView('chat');
+}
+
+async function send() {
+  const text = $('chatInput').value.trim();
+  const file = $('chatFile').files[0];
+  if (!text && !file) return;
+  addBubble((text || '') + (file ? ` 📎${file.name}` : ''), 'user');
+  $('chatInput').value = ''; $('chatFile').value = '';
+
+  if (/余额表|资产/.test(text) && !file) { addBubble('为你打开科目余额表 👉（已切换视图）'); switchView('tb'); return; }
+
+  try {
+    let doc;
+    if (file) {
+      const form = new FormData();
+      form.append('file', file);
+      const resp = await fetch(`/api/ai/parse?book_id=${BOOK.id}`, { method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN }, body: form });
+      if (!resp.ok) throw new Error((await resp.json()).detail || '解析失败');
+      doc = await resp.json();
+    } else {
+      doc = await api('/api/ai/parse', { method: 'POST', body: JSON.stringify({ book_id: BOOK.id, note: text }) });
+    }
+    let warnHtml = (doc.warnings || []).map(w => `<div class="warn">⚠ ${w}</div>`).join('');
+    addBubble(`已完成解析（${doc.source_kind}）：${Object.entries(doc.fields).filter(([, v]) => v).map(([k, v]) => v).join(' ｜ ') || '无字段'}${warnHtml}`);
+    await autoSuggest(doc.doc_id, doc.fields, doc.doc_type);
+  } catch (e) { addBubble(`❌ ${e.message}`, 'ai'); }
+}
+
+async function autoSuggest(docId, fields, docType) {
+  const note = fields && fields.note ? fields.note : '';
+  const sug = await api('/api/ai/suggest', { method: 'POST', body: JSON.stringify({ book_id: BOOK.id, doc_id: docId, note }) });
+  const warnHtml = (sug.warnings || []).map(w => `<div class="warn">⚠ ${w}</div>`).join('');
+  addBubble(`AI 生成候选凭证（置信度 ${sug.confidence}），请核对后确认：${warnHtml}`);
+  showCard('ai', sug.voucher, docId);
+}
+
+async function reSuggest() {
+  if (!cardState.docId) return;
+  const sug = await api('/api/ai/suggest', { method: 'POST', body: JSON.stringify({ book_id: BOOK.id, doc_id: cardState.docId }) });
+  showCard('ai', sug.voucher, cardState.docId);
+}
+
+async function confirmCard(mode) {
+  const card = document.getElementById('vcCard');
+  const voucher_date = card.querySelector('#vc_date').value;
+  const attachment_count = parseInt((card.querySelector('#vc_att') || {}).value || '0', 10);
+  const errEl = card.querySelector('#vc_err');
+  try {
+    let voucher;
+    if (mode === 'ai') {
+      voucher = await api('/api/ai/confirm', {
+        method: 'POST',
+        body: JSON.stringify({ doc_id: cardState.docId, voucher_date, lines: cardState.voucher.lines }),
+      });
+    } else {
+      voucher = await api(`/api/vouchers?book_id=${BOOK.id}`, {
+        method: 'POST',
+        body: JSON.stringify({ voucher_date, attachment_count, source: 'manual', lines: cardState.voucher.lines }),
+      });
+    }
+    addBubble(`✅ 已落账：${voucher.voucher_no_display}（草稿，待审核）`);
+    document.getElementById('vcCard').remove();
+    loadSummary(); if (currentView === 'vouchers') renderVouchers();
+  } catch (e) { errEl.textContent = '确认失败：' + e.message; }
+}
+
+/* ---------- 模块视图 ---------- */
+async function renderVouchers() {
+  $('mainArea').innerHTML = `<h3 class="view-title">📋 凭证（${PERIOD}）
+    <select id="v_status" onchange="renderVouchers()" style="margin-left:.8rem">
+      <option value="">全部状态</option>${['draft', 'submitted', 'audited', 'posted', 'voided'].map(s => `<option value="${s}">${s}</option>`).join('')}
+    </select></h3><div id="v_list">加载中…</div>`;
+  const status = $('v_status').value;
+  const list = await api(`/api/vouchers?book_id=${BOOK.id}&period=${PERIOD}${status ? '&status=' + status : ''}`);
+  $('v_list').innerHTML = list.length ? `<table><tr><th>凭证号</th><th>日期</th><th>状态</th><th>来源</th><th>金额</th><th>操作</th></tr>` +
+    list.map(v => `<tr><td>${v.voucher_no_display}</td><td>${v.voucher_date}</td><td>${v.status}</td><td>${v.source}</td><td class="num">${v.total_debit}</td>
+      <td>${ROLE !== 'bookkeeper' && v.status === 'submitted' ? `<button class="small" onclick="act('${v.id}','audit')">审核</button>
+      <button class="small ghost" onclick="act('${v.id}','reject')">驳回</button>` : ''}
+      ${ROLE !== 'bookkeeper' && v.status === 'audited' ? `<button class="small" onclick="act('${v.id}','post')">过账</button>` : ''}
+      ${ROLE !== 'bookkeeper' && v.status === 'posted' ? `<button class="small ghost" onclick="act('${v.id}','unpost')">反过账</button>` : ''}</td></tr>`).join('') + '</table>'
+    : '<div class="result">本期暂无凭证</div>';
+}
+
+async function act(id, action) {
+  try { await api(`/api/vouchers/${id}/${action}`, { method: 'POST' }); renderVouchers(); loadSummary(); }
+  catch (e) { alert('操作失败：' + e.message); }
+}
+
+async function renderTB() {
+  $('mainArea').innerHTML = `<h3 class="view-title">📊 科目余额表（${PERIOD}）</h3><div id="t_body">加载中…</div>`;
+  const r = await api(`/api/reports/trial-balance?book_id=${BOOK.id}&period=${PERIOD}`);
+  const rows = r.rows.filter(row => row.period_debit !== '0.00' || row.period_credit !== '0.00' || row.closing_debit !== '0.00' || row.closing_credit !== '0.00' || row.opening_debit !== '0.00');
+  $('t_body').innerHTML = `<div class="badge">${r.is_balanced ? '✅ 三栏平衡' : '❌ 不平衡'}</div>
+    <table><tr><th>科目</th><th class="num">期初借</th><th class="num">期初贷</th><th class="num">发生借</th><th class="num">发生贷</th><th class="num">期末借</th><th class="num">期末贷</th></tr>` +
+    rows.map(row => `<tr><td>${row.account_code} ${row.account_name}</td><td class="num">${row.opening_debit}</td><td class="num">${row.opening_credit}</td><td class="num">${row.period_debit}</td><td class="num">${row.period_credit}</td><td class="num">${row.closing_debit}</td><td class="num">${row.closing_credit}</td></tr>`).join('') +
+    `<tr class="total-row"><td>合计</td><td class="num">${r.totals.opening_debit}</td><td class="num">${r.totals.opening_credit}</td><td class="num">${r.totals.period_debit}</td><td class="num">${r.totals.period_credit}</td><td class="num">${r.totals.closing_debit}</td><td class="num">${r.totals.closing_credit}</td></tr></table>`;
+}
+
+async function renderIS() {
+  $('mainArea').innerHTML = `<h3 class="view-title">📈 利润表（${PERIOD}）</h3><div id="t_body">加载中…</div>`;
+  const r = await api(`/api/reports/income-statement?book_id=${BOOK.id}&period=${PERIOD}`);
+  $('t_body').innerHTML = `<table><tr><th>项目</th><th class="num">本月</th><th class="num">本年累计</th></tr>` +
+    r.rows.map(row => `<tr class="${row.bold ? 'total-row' : ''}"><td>${row.name}</td><td class="num">${row.month}</td><td class="num">${row.year_to_date}</td></tr>`).join('') + '</table>';
+}
+
+async function renderBS() {
+  $('mainArea').innerHTML = `<h3 class="view-title">📉 资产负债表（${PERIOD}）</h3><div id="t_body">加载中…</div>`;
+  const r = await api(`/api/reports/balance-sheet?book_id=${BOOK.id}&period=${PERIOD}`);
+  $('t_body').innerHTML = `<div class="badge">${r.total_assets === r.total_liabilities_and_equity ? '✅ 资产 = 负债 + 权益' : '❌ 不平衡'}</div>
+    <table><tr><th>项目</th><th class="num">期末余额</th><th class="num">年初余额</th></tr>` +
+    r.rows.map(row => `<tr class="${row.bold ? 'total-row' : ''}"><td>${row.name}</td><td class="num">${row.closing}</td><td class="num">${row.year_begin}</td></tr>`).join('') + '</table>';
+}
+
+async function renderInvoices() {
+  $('mainArea').innerHTML = `<h3 class="view-title">🧾 发票 <button class="ghost small" onclick="location.href='/docs'">去导入金税 Excel</button></h3><div id="t_body">加载中…</div>`;
+  const list = await api(`/api/invoices?book_id=${BOOK.id}`);
+  $('t_body').innerHTML = list.length ? `<table><tr><th>号码</th><th>日期</th><th>方向</th><th>类型</th><th class="num">价税合计</th><th>状态</th></tr>` +
+    list.map(i => `<tr><td>${i.invoice_no}</td><td>${i.invoice_date}</td><td>${i.kind}</td><td>${i.invoice_type}</td><td class="num">${i.amount_total}</td><td>${i.status}</td></tr>`).join('') + '</table>'
+    : '<div class="result">暂无发票。可通过 /docs 的 POST /api/invoices/import 上传金税导出 Excel。</div>';
+}
+
+async function renderTax() {
+  const [y, m] = PERIOD.split('-');
+  const quarter = Math.ceil(parseInt(m, 10) / 3);
+  $('mainArea').innerHTML = `<h3 class="view-title">💰 报税（${y}Q${quarter}）</h3><div id="t_body">加载中…</div>`;
+  const vat = await api(`/api/tax/vat?book_id=${BOOK.id}&year=${y}&quarter=${quarter}`);
+  const cit = await api(`/api/tax/cit?book_id=${BOOK.id}&year=${y}&quarter=${quarter}`);
+  const reminders = await api('/api/tax/reminders?within_days=60');
+  $('t_body').innerHTML = `
+    <div class="card"><b>增值税（${y}Q${quarter}）</b>
+      <div class="kv">季度销售额 ${vat.quarter_total_incl} ｜ 起征点 ${vat.threshold} ｜ ${vat.exempt ? '✅ 免税' : '全额计税'}</div>
+      <div class="kv">应纳增值税 <b>${vat.vat_payable}</b> ｜ 附加税费 ${vat.surtax.total}</div>
+      <div class="result">${vat.hints.join('；')}</div></div>
+    <div class="card"><b>企业所得税预缴</b>
+      <div class="kv">累计利润 ${cit.profit_ytd} ｜ ${cit.actual_rate} ｜ 本期应预缴 <b>${cit.prepaid_this}</b></div></div>
+    <div class="card"><b>申报辅助表</b><button class="ghost small" onclick="window.open('/api/tax/export?book_id=${BOOK.id}&year=${y}&quarter=${quarter}')">导出 Excel</button></div>
+    <div class="card"><b>近 60 天征期</b>${reminders.map(r2 => `<div class="kv">⏰ ${r2.due_date} ${r2.tax}（${r2.period}）</div>`).join('') || '<div class="result">无</div>'}</div>`;
+}
+
+/* ---------- 右栏 ---------- */
+async function loadReminders() {
+  try {
+    const reminders = await api('/api/tax/reminders?within_days=30');
+    $('rp_reminders').innerHTML = reminders.length
+      ? reminders.map(r2 => `<div class="remind">${r2.due_date}<br>${r2.tax}</div>`).join('')
+      : '<div class="result">30 天内无征期</div>';
+  } catch (e) { $('rp_reminders').textContent = '加载失败'; }
+}
+
+async function loadSummary() {
+  try {
+    const is = await api(`/api/reports/income-statement?book_id=${BOOK.id}&period=${PERIOD}`);
+    const bs = await api(`/api/reports/balance-sheet?book_id=${BOOK.id}&period=${PERIOD}`);
+    const get = (rows, key) => (rows.find(r2 => r2.key === key) || {}).month || '0.00';
+    $('rp_summary').innerHTML = `
+      <div class="kv"><span>营业收入</span><b>${get(is.rows, 'operating_revenue')}</b></div>
+      <div class="kv"><span>净利润</span><b>${is.month_net_profit}</b></div>
+      <div class="kv"><span>资产总计</span><b>${bs.total_assets}</b></div>
+      <div class="kv"><span>未分配利润</span><b>${(bs.rows.find(r2 => r2.key === 'undistributed_profits') || {}).closing || '0.00'}</b></div>`;
+  } catch (e) { $('rp_summary').textContent = '加载失败'; }
+}
+
+if (TOKEN) { boot().catch(() => {}); } else { $('l_pass').focus(); }
+</script>
+</body>
+</html>

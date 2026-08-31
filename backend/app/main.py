@@ -93,3 +93,10 @@ def settings_page():
     from fastapi.responses import FileResponse
 
     return FileResponse(Path(__file__).resolve().parent / "static" / "index.html")
+
+
+@app.get("/app", include_in_schema=False)
+def app_page():
+    from fastapi.responses import FileResponse
+
+    return FileResponse(Path(__file__).resolve().parent / "static" / "app.html")
