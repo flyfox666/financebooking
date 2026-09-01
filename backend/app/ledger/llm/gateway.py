@@ -71,6 +71,36 @@ def _to_anthropic_messages(messages: list[dict]) -> tuple[str, list[dict]]:
                     if part.get("type") == "text":
                         system_parts.append(part["text"])
             continue
+        tool_calls = message.get("tool_calls") or []
+        if tool_calls:
+            blocks = []
+            if content:
+                blocks.append({"type": "text", "text": content})
+            for call in tool_calls:
+                blocks.append(
+                    {
+                        "type": "tool_use",
+                        "id": call["id"],
+                        "name": call["name"],
+                        "input": call.get("arguments", {}),
+                    }
+                )
+            converted.append({"role": "assistant", "content": blocks})
+            continue
+        if role == "tool":
+            converted.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": message["tool_call_id"],
+                            "content": str(message.get("content", "")),
+                        }
+                    ],
+                }
+            )
+            continue
         if isinstance(content, str):
             blocks = [{"type": "text", "text": content}]
         else:
@@ -87,6 +117,32 @@ def _to_anthropic_messages(messages: list[dict]) -> tuple[str, list[dict]]:
                     )
         converted.append({"role": role, "content": blocks})
     return "\n".join(system_parts), converted
+
+
+def _normalize_openai_tool_calls(raw_calls: list[dict] | None) -> list[dict]:
+    normalized = []
+    for call in raw_calls or []:
+        function = call.get("function", {})
+        arguments = function.get("arguments", "{}")
+        try:
+            args = json.loads(arguments) if isinstance(arguments, str) else dict(arguments)
+        except json.JSONDecodeError:
+            args = {"_raw": arguments}
+        normalized.append({"id": call.get("id", ""), "name": function.get("name", ""), "arguments": args})
+    return normalized
+
+
+def _to_anthropic_tools(tools: list[dict] | None) -> list[dict] | None:
+    if not tools:
+        return None
+    return [
+        {
+            "name": tool["name"],
+            "description": tool.get("description", ""),
+            "input_schema": tool.get("parameters", {"type": "object", "properties": {}}),
+        }
+        for tool in tools
+    ]
 
 
 def _chat_openai(
@@ -123,6 +179,55 @@ def _chat_anthropic(
     )
     text = "".join(block.get("text", "") for block in data.get("content", []))
     return {"content": text, "usage": data.get("usage", {})}
+
+
+def chat_with_tools(
+    db: Session,
+    *,
+    messages: list[dict],
+    tools: list[dict],
+    provider_id: int | None = None,
+    max_tokens: int = 2048,
+    model_override: str | None = None,
+) -> dict:
+    """带工具定义的对话：返回 {"content", "tool_calls": [{id,name,arguments}], "usage"}。"""
+    provider = _resolve_provider(db, provider_id)
+    model = model_override or provider.model
+    timeout = float(get_settings().LLM_TIMEOUT_SECONDS)
+    if provider.protocol == "anthropic":
+        system, converted = _to_anthropic_messages(messages)
+        payload: dict = {"model": model, "max_tokens": max_tokens, "messages": converted}
+        if system:
+            payload["system"] = system
+        anthropic_tools = _to_anthropic_tools(tools)
+        if anthropic_tools:
+            payload["tools"] = anthropic_tools
+        data = _http_post(
+            _anthropic_url(provider.base_url),
+            {"x-api-key": provider.api_key, "anthropic-version": ANTHROPIC_VERSION},
+            payload,
+            timeout,
+        )
+        content = "".join(block.get("text", "") for block in data.get("content", []) if block.get("type") == "text")
+        tool_calls = [
+            {"id": block.get("id", ""), "name": block.get("name", ""), "arguments": block.get("input", {})}
+            for block in data.get("content", [])
+            if block.get("type") == "tool_use"
+        ]
+        return {"content": content, "tool_calls": tool_calls, "usage": data.get("usage", {})}
+    payload = {"model": model, "messages": messages, "max_tokens": max_tokens, "tools": tools}
+    data = _http_post(
+        _openai_url(provider.base_url),
+        {"Authorization": f"Bearer {provider.api_key}"},
+        payload,
+        timeout,
+    )
+    message = data["choices"][0]["message"]
+    return {
+        "content": message.get("content"),
+        "tool_calls": _normalize_openai_tool_calls(message.get("tool_calls")),
+        "usage": data.get("usage", {}),
+    }
 
 
 def chat(

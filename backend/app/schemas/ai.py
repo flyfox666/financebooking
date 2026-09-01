@@ -9,6 +9,12 @@ class SuggestIn(BaseModel):
     note: str = ""
 
 
+class ChatIn(BaseModel):
+    book_id: int
+    doc_id: int | None = None
+    history: list[dict] = Field(default_factory=list)
+
+
 class ConfirmIn(BaseModel):
     doc_id: int
     voucher_date: date

@@ -14,7 +14,7 @@ from app.ledger.ai import suggest as ai_suggest
 from app.ledger.exceptions import LedgerError
 from app.models.ai import AIDoc
 from app.models.user import User
-from app.schemas.ai import ConfirmIn, SuggestIn
+from app.schemas.ai import ChatIn, ConfirmIn, SuggestIn
 from app.schemas.voucher import VoucherOut
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
@@ -144,6 +144,59 @@ def suggest_voucher(
         "voucher": result["voucher"],
         "warnings": result["warnings"],
         "confidence": result["confidence"],
+    }
+
+
+@router.post("/chat")
+def chat_with_agent(
+    body: ChatIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    from app.ledger.ai.agent import run_agent
+
+    doc_context = ""
+    doc = None
+    if body.doc_id is not None:
+        doc = db.get(AIDoc, body.doc_id)
+        if doc is None or doc.book_id != body.book_id:
+            raise HTTPException(status_code=404, detail="AI 解析记录不存在")
+        if doc.status == "confirmed":
+            raise HTTPException(status_code=400, detail="该记录已确认落账")
+        fields = json.loads(doc.fields_json or "{}")
+        warnings = json.loads(doc.warnings_json or "[]")
+        doc_context = json.dumps(
+            {"doc_type": doc.doc_type, "file_name": doc.file_name, "fields": fields, "warnings": warnings},
+            ensure_ascii=False,
+        )
+
+    history = [
+        {"role": m.get("role", "user"), "content": str(m.get("content", ""))}
+        for m in body.history
+        if m.get("role") in ("user", "assistant") and m.get("content")
+    ][-12:]
+
+    try:
+        result = run_agent(db, book_id=body.book_id, history=history, doc_context=doc_context)
+    except LedgerError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    doc_id = None
+    voucher_saved = False
+    if doc is not None and result.get("voucher"):
+        doc.model_output = json.dumps(result["voucher"], ensure_ascii=False)
+        doc.status = "suggested"
+        db.commit()
+        doc_id = doc.id
+        voucher_saved = True
+
+    return {
+        "doc_id": doc_id,
+        "reply": result["reply"],
+        "voucher": result.get("voucher"),
+        "trace": result["trace"],
+        "stopped_by_ask_user": result["stopped_by_ask_user"],
+        "voucher_saved": voucher_saved,
     }
 
 

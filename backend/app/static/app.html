@@ -317,6 +317,13 @@ function newManualCard() {
   });
 }
 
+let CHAT_HISTORY = [];
+let pendingAsk = null;
+const TOOL_CN = {
+  search_invoices: '查发票', query_balance: '查科目余额', query_vouchers: '查凭证',
+  list_contacts: '查往来单位', find_or_create_contact: '建档往来单位', ask_user: '向用户提问',
+};
+
 async function send() {
   const text = $('chatInput').value.trim();
   const file = $('chatFile').files[0];
@@ -324,9 +331,20 @@ async function send() {
   addBubble((text || '') + (file ? ` 📎${file.name}` : ''), 'user');
   $('chatInput').value = ''; $('chatFile').value = '';
 
-  if (/余额表|资产/.test(text) && !file) { addBubble('为你打开科目余额表 👉（已切换视图）'); switchView('tb'); return; }
+  if (/^看(看)??(余额表|资产负债表|利润表|现金流量表|凭证|发票|报税)/.test(text)) {
+    const map = { 余额表: 'tb', 资产负债表: 'reports', 利润表: 'reports', 现金流量表: 'reports', 凭证: 'vouchers', 发票: 'invoices', 报税: 'tax' };
+    const view = Object.keys(map).find(k => text.includes(k));
+    addBubble(`好的，为你打开对应视图 👉`);
+    switchView(map[view]);
+    return;
+  }
 
   try {
+    if (pendingAsk && !file) {
+      CHAT_HISTORY.push({ role: 'user', content: text });
+      await agentChat(pendingAsk.docId);
+      return;
+    }
     let doc;
     if (file) {
       const form = new FormData();
@@ -334,29 +352,56 @@ async function send() {
       const resp = await fetch(`/api/ai/parse?book_id=${BOOK.id}`, { method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN }, body: form });
       if (!resp.ok) throw new Error((await resp.json()).detail || '解析失败');
       doc = await resp.json();
+      const warnHtml = (doc.warnings || []).map(w => `<div class="warn">⚠ ${w}</div>`).join('');
+      addBubble(`📄 已解析（${doc.source_kind}）：${Object.values(doc.fields).filter(v => v).join(' ｜ ') || '无字段'}${warnHtml}`);
     } else {
       doc = await api('/api/ai/parse', { method: 'POST', body: JSON.stringify({ book_id: BOOK.id, note: text }) });
     }
-    const warnHtml = (doc.warnings || []).map(w => `<div class="warn">⚠ ${w}</div>`).join('');
-    addBubble(`已完成解析（${doc.source_kind}）：${Object.values(doc.fields).filter(v => v).join(' ｜ ') || '无字段'}${warnHtml}`);
-    await autoSuggest(doc.doc_id, doc.fields);
+    CHAT_HISTORY.push({ role: 'user', content: text || `[文件] ${file.name}` });
+    await agentChat(doc.doc_id);
   } catch (e) { addBubble(`❌ ${e.message}`); }
 }
 
-async function autoSuggest(docId, fields) {
-  const note = fields && fields.note ? fields.note : '';
-  const sug = await api('/api/ai/suggest', { method: 'POST', body: JSON.stringify({ book_id: BOOK.id, doc_id: docId, note }) });
-  const warnHtml = (sug.warnings || []).map(w => `<div class="warn">⚠ ${w}</div>`).join('');
-  addBubble(`AI 生成候选凭证（置信度 ${sug.confidence}），请核对后确认：${warnHtml}`);
-  sug.voucher.lines.forEach(l => { if (l.contact_id === undefined) l.contact_id = null; });
-  showCard('ai', sug.voucher, docId);
+async function agentChat(docId) {
+  const body = $('chatBox');
+  const thinking = document.createElement('div');
+  thinking.className = 'bubble ai';
+  thinking.textContent = '⏳ 正在思考（可能需要查数据）…';
+  body.appendChild(thinking); body.scrollTop = body.scrollHeight;
+  const data = await api('/api/ai/chat', {
+    method: 'POST',
+    body: JSON.stringify({ book_id: BOOK.id, doc_id: docId, history: CHAT_HISTORY }),
+  });
+  thinking.remove();
+  (data.trace || []).forEach(t => addTrace(t));
+  CHAT_HISTORY.push({ role: 'assistant', content: data.reply });
+  if (data.stopped_by_ask_user) {
+    pendingAsk = { docId };
+    addBubble(`🤖 ${data.reply}`);
+    return;
+  }
+  pendingAsk = null;
+  if (data.voucher) {
+    data.voucher.lines.forEach(l => { if (l.contact_id === undefined) l.contact_id = null; });
+    addBubble(`🤖 ${data.reply || '凭证已生成，请核对：'}`);
+    showCard('ai', data.voucher, docId);
+  } else {
+    addBubble(`🤖 ${data.reply || '（无内容）'}`);
+  }
+}
+
+function addTrace(t) {
+  const box = $('chatBox');
+  const args = Object.entries(t.arguments || {}).map(([k, v]) => (v ? `${k}=${v}` : '')).filter(Boolean).join(' ');
+  const div = document.createElement('div');
+  div.className = 'trace';
+  div.textContent = `🛠 ${TOOL_CN[t.tool] || t.tool}${args ? ' · ' + args : ''}`;
+  box.appendChild(div); box.scrollTop = box.scrollHeight;
 }
 
 async function reSuggest() {
   if (!cardState.docId) return;
-  const sug = await api('/api/ai/suggest', { method: 'POST', body: JSON.stringify({ book_id: BOOK.id, doc_id: cardState.docId }) });
-  sug.voucher.lines.forEach(l => { if (l.contact_id === undefined) l.contact_id = null; });
-  showCard('ai', sug.voucher, cardState.docId);
+  await agentChat(cardState.docId);
 }
 
 async function confirmCard(mode) {
@@ -379,7 +424,7 @@ async function confirmCard(mode) {
     }
     addBubble(`✅ 已落账：${voucher.voucher_no_display}（${STATUS_CN[voucher.status]}，待审核）`);
     document.getElementById('vcCard').remove();
-    loadSummary(); if (currentView === 'vouchers') renderVouchers();
+    pendingAsk = null; loadSummary(); if (currentView === 'vouchers') renderVouchers();
   } catch (e) { errEl.textContent = '确认失败：' + e.message; }
 }
 
