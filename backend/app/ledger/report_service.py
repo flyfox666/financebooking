@@ -237,7 +237,12 @@ def template_check(db: Session, *, book_id: int, period: str) -> dict:
     accounts_out = []
     for code in sorted(tb_rows):
         r = tb_rows[code]
-        mapped_reports = [rep for rep in ("bs", "is") if code in covered[rep]]
+        # 覆盖判定与报表取数口径一致：明细科目（如 5602.01）经父级卷汇总计入公式科目（5602），
+        # 因此公式覆盖其任一上层科目即视为已映射
+        mapped_reports = [
+            rep for rep in ("bs", "is")
+            if any(code == f or code.startswith(f + ".") for f in covered[rep])
+        ]
         closing_debit = Decimal(r["closing_debit"])
         closing_credit = Decimal(r["closing_credit"])
         accounts_out.append(
