@@ -54,15 +54,10 @@
   .chip.on { border-color:var(--accent); color:var(--accent); font-weight:700; }
   #loginView { max-width:360px; margin:12vh auto; }
   #loginView input { width:100%; margin-bottom:.7rem; }
-  .inputbar { display:flex; gap:.5rem; align-items:center; background:#fff; border:1px solid var(--rule); border-radius:10px; padding:.5rem; position:sticky; bottom:.5rem; }
+  .inputbar { display:flex; gap:.5rem; align-items:center; background:#fff; border:1px solid var(--rule); border-radius:10px; padding:.5rem; flex:none; }
   .inputbar input[type=text] { flex:1; border:none; outline:none; }
-  .chat-panel { position:fixed; right:20px; bottom:20px; width:420px; height:560px; max-width:calc(100vw - 32px); max-height:calc(100vh - 32px); min-width:min(320px, calc(100vw - 32px)); min-height:280px; overflow:hidden; background:var(--bg); border:1px solid var(--rule); border-radius:12px; box-shadow:0 12px 40px rgba(31,39,51,.22); z-index:60; display:flex; flex-direction:column; }
-  .chat-panel-head { display:flex; align-items:center; gap:.5rem; padding:.55rem .8rem; background:#fff; border-bottom:1px solid var(--rule); cursor:move; user-select:none; font-weight:700; flex:none; }
-  .chat-panel-head .spacer { flex:1; }
-  .chat-panel-head button { padding:.05rem .55rem; font-size:.95rem; line-height:1.3; }
-  .chat-panel-body { display:flex; flex-direction:column; flex:1; min-height:0; padding:.5rem .7rem; }
-  .chat-panel.collapsed { height:auto !important; min-height:0; max-height:none; }
-  .chat-panel.collapsed .chat-panel-body { display:none; }
+  .chat-view { display:flex; flex-direction:column; height:100%; min-height:0; }
+  .chat-flow { flex:1; min-height:0; overflow-y:auto; padding-right:.3rem; }
   .badge { font-size:.72rem; padding:.1rem .5rem; border-radius:10px; background:var(--soft); color:var(--accent); font-weight:700; }
   .badge.gray { background:#eee; color:var(--muted); }
   h3.view-title { margin-bottom:.8rem; }
@@ -128,16 +123,6 @@
     <div id="rp_reminders">…</div>
     <h4>💡 本期概要</h4>
     <div id="rp_summary">…</div>
-  </div>
-
-  <div id="chatPanel" class="chat-panel hidden">
-    <div class="chat-panel-head" id="chatPanelHead">
-      <span>💬 记账助手</span>
-      <span class="spacer"></span>
-      <button class="ghost" id="cpCollapse" onclick="collapseChatPanel()">—</button>
-      <button class="ghost" onclick="toggleChatPanel(false)">×</button>
-    </div>
-    <div id="chatPanelBody" class="chat-panel-body"></div>
   </div>
 </div>
 
@@ -210,9 +195,6 @@ async function boot() {
   $('mainView').classList.remove('hidden');
   await loadMasters();
   await Promise.all([loadReminders(), loadSummary()]);
-  renderChat();
-  restoreChatPanelRect();
-  toggleChatPanel(true);
   switchView('vouchers');
 }
 
@@ -230,102 +212,18 @@ async function loadMasters() {
 function onPeriodChange() { PERIOD = $('period').value; loadSummary(); if (currentView !== 'chat') switchView(currentView); }
 
 function updateNav() {
-  const chatOpen = !$('chatPanel').classList.contains('hidden');
   document.querySelectorAll('#sideNav div').forEach(el => {
-    const v = el.dataset.view;
-    el.classList.toggle('active', v === 'chat' ? chatOpen : v === currentView);
+    el.classList.toggle('active', el.dataset.view === currentView);
   });
 }
 
 function switchView(view) {
-  if (view === 'chat') { toggleChatPanel(); return; }
   if (view === 'llm') { window.open('/settings', '_blank'); return; }
   currentView = view;
   updateNav();
-  ({ vouchers: renderVouchers, accounts: renderAccounts, contacts: renderContactsView, tb: renderTB, reports: renderReports,
+  ({ chat: renderChat, vouchers: renderVouchers, accounts: renderAccounts, contacts: renderContactsView, tb: renderTB, reports: renderReports,
      opening: renderOpening, invoices: renderInvoices, tax: renderTax, users: renderUsers })[view]();
 }
-
-(function initChatPanelDrag() {
-  const head = $('chatPanelHead'), panel = $('chatPanel');
-  let dragging = null;
-  head.addEventListener('mousedown', e => {
-    if (e.target.tagName === 'BUTTON') return;
-    const rect = panel.getBoundingClientRect();
-    // 靠近边缘的按下交给边缘缩放处理
-    const nx = e.clientX - rect.left, ny = e.clientY - rect.top;
-    if (nx <= CHAT_EDGE || nx >= rect.width - CHAT_EDGE || ny <= CHAT_EDGE) return;
-    panel.style.left = rect.left + 'px'; panel.style.top = rect.top + 'px';
-    panel.style.right = 'auto'; panel.style.bottom = 'auto';
-    dragging = { dx: e.clientX - rect.left, dy: e.clientY - rect.top };
-    e.preventDefault();
-  });
-  document.addEventListener('mousemove', e => {
-    if (!dragging) return;
-    let x = e.clientX - dragging.dx, y = e.clientY - dragging.dy;
-    x = Math.max(0, Math.min(x, window.innerWidth - 60));
-    y = Math.max(0, Math.min(y, window.innerHeight - 40));
-    panel.style.left = x + 'px'; panel.style.top = y + 'px';
-  });
-  document.addEventListener('mouseup', () => { dragging = null; saveChatPanelRect(); });
-})();
-
-/* 八方向边缘缩放：四条边 + 四个角均可拖拽调整窗口大小 */
-const CHAT_EDGE = 7, CHAT_MIN_W = 320, CHAT_MIN_H = 280;
-const CHAT_CURSORS = { nw:'nwse-resize', se:'nwse-resize', ne:'nesw-resize', sw:'nesw-resize', n:'ns-resize', s:'ns-resize', e:'ew-resize', w:'ew-resize' };
-function chatEdgeAt(e) {
-  const p = $('chatPanel');
-  if (!p || p.classList.contains('hidden') || p.classList.contains('collapsed')) return null;
-  const r = p.getBoundingClientRect();
-  const nx = e.clientX - r.left, ny = e.clientY - r.top;
-  const nearL = nx >= -CHAT_EDGE && nx <= CHAT_EDGE;
-  const nearR = nx >= r.width - CHAT_EDGE && nx <= r.width + CHAT_EDGE;
-  const nearT = ny >= -CHAT_EDGE && ny <= CHAT_EDGE;
-  const nearB = ny >= r.height - CHAT_EDGE && ny <= r.height + CHAT_EDGE;
-  if (nearL && nearT) return 'nw';
-  if (nearR && nearT) return 'ne';
-  if (nearL && nearB) return 'sw';
-  if (nearR && nearB) return 'se';
-  if (nearL) return 'w';
-  if (nearR) return 'e';
-  if (nearT) return 'n';
-  if (nearB) return 's';
-  return null;
-}
-(function initChatPanelResize() {
-  const panel = $('chatPanel');
-  let rz = null;
-  document.addEventListener('mousemove', e => {
-    if (rz) {
-      const r = rz.orig;
-      let w = r.w, h = r.h, x = r.x, y = r.y;
-      if (rz.dir.includes('e')) w = Math.max(CHAT_MIN_W, Math.min(e.clientX - r.x, window.innerWidth - r.x));
-      if (rz.dir.includes('s')) h = Math.max(CHAT_MIN_H, Math.min(e.clientY - r.y, window.innerHeight - r.y));
-      if (rz.dir.includes('w')) {
-        const nx = Math.max(0, Math.min(e.clientX, r.x + r.w - CHAT_MIN_W));
-        w = r.x + r.w - nx; x = nx;
-      }
-      if (rz.dir.includes('n')) {
-        const ny = Math.max(0, Math.min(e.clientY, r.y + r.h - CHAT_MIN_H));
-        h = r.y + r.h - ny; y = ny;
-      }
-      panel.style.left = x + 'px'; panel.style.top = y + 'px';
-      panel.style.width = w + 'px'; panel.style.height = h + 'px';
-      return;
-    }
-    const dir = chatEdgeAt(e);
-    panel.style.cursor = dir ? CHAT_CURSORS[dir] : '';
-  });
-  document.addEventListener('mousedown', e => {
-    if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-    const dir = chatEdgeAt(e);
-    if (!dir) return;
-    const r = panel.getBoundingClientRect();
-    rz = { dir, orig: { x: r.left, y: r.top, w: r.width, h: r.height } };
-    e.preventDefault();
-  });
-  document.addEventListener('mouseup', () => { if (rz) { rz = null; saveChatPanelRect(); fitVoucherLines(); } });
-})();
 
 function addBubble(html, cls = 'ai') {
   chatLog.push({ html, cls });
@@ -338,17 +236,23 @@ function addBubble(html, cls = 'ai') {
   flow.scrollTop = flow.scrollHeight;
 }
 
-/* ---------- 对话视图（悬浮助手窗） ---------- */
+/* ---------- 对话视图（标准主视图） ---------- */
 function renderChat() {
-  $('chatPanelBody').innerHTML = `
-    <div id="chatFlow" style="flex:1; min-height:0; overflow-y:auto; padding-right:.3rem"></div>
-    <div class="chips" id="chips"></div>
-    <div class="inputbar">
-      <input type="file" id="chatFile" class="hidden">
-      <button class="ghost" onclick="$('chatFile').click()" title="上传单据">📎</button>
-      <input type="text" id="chatInput" placeholder="输入业务描述，或上传单据文件（回车发送）" onkeydown="if(event.key==='Enter')send()">
-      <button class="ghost" onclick="newManualCard()">＋ 新增凭证</button>
-      <button onclick="send()">发送</button>
+  if (!chatLog.length) {
+    chatLog.push({ html: '你好，我是记账助手 🤖<br>直接描述业务（如「支付阿里云服务器费 3200 元」）或点 📎 上传发票/单据，我来生成凭证；也可以随时提问查数据。', cls: 'ai' });
+  }
+  $('mainArea').innerHTML = `
+    <div class="chat-view">
+      <h3 class="view-title" style="flex:none">💬 记账助手</h3>
+      <div id="chatFlow" class="chat-flow"></div>
+      <div class="chips" id="chips"></div>
+      <div class="inputbar">
+        <input type="file" id="chatFile" class="hidden">
+        <button class="ghost" onclick="$('chatFile').click()" title="上传单据">📎</button>
+        <input type="text" id="chatInput" placeholder="输入业务描述，或上传单据文件（回车发送）" onkeydown="if(event.key==='Enter')send()">
+        <button class="ghost" onclick="newManualCard()">＋ 新增凭证</button>
+        <button onclick="send()">发送</button>
+      </div>
     </div>`;
   const flow = $('chatFlow');
   chatLog.forEach(m => { const div = document.createElement('div'); div.className = 'bubble ' + m.cls; div.innerHTML = m.html; flow.appendChild(div); });
@@ -360,69 +264,7 @@ function renderChat() {
     $('chips').appendChild(c);
   });
   $('chatFile').onchange = () => { if ($('chatFile').files[0]) send(); };
-}
-
-function toggleChatPanel(show) {
-  const panel = $('chatPanel');
-  const visible = show === undefined ? panel.classList.contains('hidden') : show;
-  panel.classList.toggle('hidden', !visible);
-  updateNav();
-  if (visible) { const flow = $('chatFlow'); if (flow) flow.scrollTop = flow.scrollHeight; }
-}
-
-let _chatRectCache = '';
-function saveChatPanelRect() {
-  const p = $('chatPanel');
-  if (p.classList.contains('hidden') || p.classList.contains('collapsed')) return;
-  const r = p.getBoundingClientRect();
-  const data = JSON.stringify({ x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) });
-  if (data === _chatRectCache) return;
-  _chatRectCache = data;
-  try { localStorage.setItem('ledger_chat_rect', data); } catch (e) {}
-}
-
-function restoreChatPanelRect() {
-  try {
-    const saved = JSON.parse(localStorage.getItem('ledger_chat_rect') || 'null');
-    if (!saved) return;
-    const p = $('chatPanel');
-    const minW = Math.min(320, window.innerWidth - 32);
-    p.style.left = Math.max(0, Math.min(saved.x, window.innerWidth - 60)) + 'px';
-    p.style.top = Math.max(0, Math.min(saved.y, window.innerHeight - 40)) + 'px';
-    p.style.right = 'auto'; p.style.bottom = 'auto';
-    p.style.width = Math.max(minW, Math.min(saved.w, window.innerWidth - 32)) + 'px';
-    p.style.height = Math.max(280, Math.min(saved.h, window.innerHeight - 32)) + 'px';
-  } catch (e) {}
-}
-
-// 浏览器窗口尺寸变化时，把悬浮窗拉回可视区域并保存新位置
-window.addEventListener('resize', () => {
-  const p = $('chatPanel');
-  if (!p || p.classList.contains('hidden') || p.classList.contains('collapsed')) return;
-  const r = p.getBoundingClientRect();
-  const minW = Math.min(320, window.innerWidth - 32);
-  const x = Math.max(0, Math.min(r.left, window.innerWidth - 60));
-  const y = Math.max(0, Math.min(r.top, window.innerHeight - 40));
-  const w = Math.max(minW, Math.min(r.width, window.innerWidth - 32));
-  const h = Math.max(280, Math.min(r.height, window.innerHeight - 32));
-  p.style.left = x + 'px'; p.style.top = y + 'px';
-  p.style.width = w + 'px'; p.style.height = h + 'px';
-  saveChatPanelRect();
-});
-
-let _chatPanelH = '';
-function collapseChatPanel() {
-  const panel = $('chatPanel');
-  const collapsed = panel.classList.toggle('collapsed');
-  if (collapsed) {
-    _chatPanelH = panel.style.height;   // 记住展开时的高度，清掉内联让 CSS height:auto 生效
-    panel.style.height = '';
-  } else {
-    panel.style.height = _chatPanelH || '';
-    const flow = $('chatFlow'); if (flow) flow.scrollTop = flow.scrollHeight;
-    fitVoucherLines();
-  }
-  $('cpCollapse').textContent = collapsed ? '▢' : '—';
+  fitVoucherLines();
 }
 
 function contactOptions(selected, allowedTypes) {
@@ -564,7 +406,7 @@ function refreshCardTotals() {
 }
 
 function newManualCard() {
-  toggleChatPanel(true);
+  switchView('chat');
   showCard('manual', {
     voucher_date: new Date().toISOString().slice(0, 10),
     lines: [
@@ -627,11 +469,11 @@ async function send() {
 }
 
 async function agentChat(docId) {
-  const body = $('chatFlow');
+  const body = $('chatFlow');   // 用户中途切走视图时为 null，气泡已入 chatLog，切回时重放
   const thinking = document.createElement('div');
   thinking.className = 'bubble ai';
   thinking.textContent = '⏳ 正在思考（可能需要查数据）…';
-  body.appendChild(thinking); body.scrollTop = body.scrollHeight;
+  if (body) { body.appendChild(thinking); body.scrollTop = body.scrollHeight; }
   let data;
   try {
     data = await api('/api/ai/chat', {
@@ -662,6 +504,7 @@ async function agentChat(docId) {
 
 function addTrace(t) {
   const box = $('chatFlow');
+  if (!box) return;
   const args = Object.entries(t.arguments || {}).map(([k, v]) => (v ? `${k}=${v}` : '')).filter(Boolean).join(' ');
   const div = document.createElement('div');
   div.className = 'trace';
@@ -1342,7 +1185,7 @@ async function bookInvoice(id) {
   const inv = INV_LIST.find(x => x.id === id);
   if (!inv) return;
   if (pendingAsk) { alert('AI 助手正在等你回复上一个问题，请先处理'); return; }
-  toggleChatPanel(true);
+  switchView('chat');
   const dir = inv.kind === 'sales' ? '销项' : '进项';
   const party = inv.kind === 'sales' ? `购买方「${inv.buyer_name}」` : `销售方「${inv.seller_name}」`;
   $('chatInput').value = `请为这张${dir}发票记账：发票号 ${inv.invoice_no}，开票日期 ${inv.invoice_date}，${party}，品名「${inv.goods_name}」，价税合计 ${inv.amount_total} 元。`;
