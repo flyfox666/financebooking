@@ -170,3 +170,42 @@ def test_seed_default_aux_still_on(db_session, book):
 
     row = db_session.scalar(select(Account).where(Account.book_id == book.id, Account.code == "1122"))
     assert row.aux_types == "contact:customer"
+
+
+# ---------- G3 往来 ID 净化（_sanitize_contacts 硬兜底）----------
+
+
+def test_sanitize_contacts_clears_fabricated_id(db_session, book):
+    """模型编造不存在的 contact_id → 落库前置空，返回清理计数。"""
+    from app.ledger.ai.agent import _sanitize_contacts
+
+    voucher = {"voucher_date": "2026-08-05", "lines": [
+        {"summary": "应收", "account_code": "1122", "debit": "100.00", "credit": "0", "contact_id": 99999},
+        {"summary": "收入", "account_code": "5001", "debit": "0", "credit": "100.00"},
+    ]}
+    cleaned = _sanitize_contacts(db_session, book.id, voucher)
+    assert cleaned == 1
+    assert voucher["lines"][0]["contact_id"] is None
+
+
+def test_sanitize_contacts_cross_book_rejected_valid_kept(db_session, book, contacts_pair):
+    """跨账套 ID 置空（数据隔离）；本账套有效 ID 保留。"""
+    from app.ledger.book_service import create_book
+    from app.ledger.ai.agent import _sanitize_contacts
+
+    other_book = create_book(
+        db_session, name="另一家测试公司", tax_no="91310000MA1K35X00B", start_period="2026-08"
+    )
+    stranger = aux_service.create_contact(
+        db_session, book_id=other_book.id, name="别家的客户", ctype="customer"
+    )
+
+    voucher = {"voucher_date": "2026-08-05", "lines": [
+        {"summary": "应收", "account_code": "1122", "debit": "100.00", "credit": "0", "contact_id": stranger.id},
+        {"summary": "应收2", "account_code": "1122", "debit": "50.00", "credit": "0", "contact_id": contacts_pair["customer"].id},
+        {"summary": "收入", "account_code": "5001", "debit": "0", "credit": "150.00"},
+    ]}
+    cleaned = _sanitize_contacts(db_session, book.id, voucher)
+    assert cleaned == 1
+    assert voucher["lines"][0]["contact_id"] is None       # 跨账套 → 置空
+    assert voucher["lines"][1]["contact_id"] == contacts_pair["customer"].id  # 本账套有效 → 保留

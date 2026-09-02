@@ -83,3 +83,21 @@ def test_net_profit_matches_profit_account_movement(db_session, mock_month_with_
     sums = balances.gross_sums(db_session, book.id, "2026-01", "2026-08")
     debit, credit = sums.get("3103", [Decimal("0.00"), Decimal("0.00")])
     assert credit - debit == Decimal("-46133.61")
+
+
+# ---------- G5 表结法：期中（未结转）恒等式 ----------
+
+
+def test_balance_sheet_identity_before_carryover(db_session, mock_month, book):
+    """表结法核心价值：期中不结转损益，资产负债表恒等式依然成立。"""
+    bs = report_service.balance_sheet(db_session, book_id=book.id, period="2026-08")
+    assert bs["total_assets"] != "0.00"                      # 确有业务数据
+    assert bs["total_assets"] == bs["total_liabilities_and_equity"]
+
+
+def test_undistributed_profit_absorbs_pnl_before_carryover(db_session, mock_month, book):
+    """未结转时「未分配利润」行吸收全部损益净额（而非 3103 裸值），与利润表勾稽。"""
+    bs = report_service.balance_sheet(db_session, book_id=book.id, period="2026-08")
+    inc = report_service.income_statement(db_session, book_id=book.id, period="2026-08")
+    rows = row_map(bs)
+    assert rows["undistributed_profits"]["closing"] == inc["month_net_profit"] == "-16133.61"
