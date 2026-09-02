@@ -54,5 +54,6 @@ class VoucherLine(Base):
     debit: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0)
     credit: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0)
     contact_id: Mapped[int | None] = mapped_column(ForeignKey("contact.id"), default=None)
+    cf_item: Mapped[str | None] = mapped_column(String(32), default=None)
 
     voucher: Mapped["Voucher"] = relationship(back_populates="lines")

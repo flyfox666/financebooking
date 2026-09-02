@@ -20,6 +20,19 @@ backend/data/
 # 生成的分享包
 .trae-html-share-packages/
 
+# vendored 依赖（体积大，pip 按 requirements.txt 还原即可）
+backend/.deps/
+
+# IDE 本地工具
+.tools/
+
+# 社媒发布素材（视频/截图，非代码资产）
+social/
+
+# 根目录杂项：截图、票据 PDF（财务文件不进仓库）
+/*.png
+/*.pdf
+
 # 系统文件
 Thumbs.db
 .DS_Store

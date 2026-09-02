@@ -9,19 +9,22 @@
   * { box-sizing:border-box; margin:0; padding:0; }
   body { font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif; background:var(--bg); color:var(--ink); font-size:14px; }
   .hidden { display:none !important; }
-  .layout { display:grid; grid-template-columns:150px 1fr 230px; height:100vh; }
-  .topbar { grid-column:1/4; display:flex; align-items:center; gap:1rem; padding:.5rem 1rem; background:#fff; border-bottom:2px solid var(--ink); }
+  .layout { display:grid; grid-template-columns:150px minmax(0,1fr) 230px; height:100vh; }
+  .topbar { grid-column:1/4; display:flex; align-items:center; gap:1rem; padding:.5rem 1rem; background:#fff; border-bottom:2px solid var(--ink); flex-wrap:wrap; }
   .topbar .brand { font-weight:700; color:var(--accent); }
   .topbar select, .topbar input { padding:.25rem .5rem; border:1px solid var(--rule); border-radius:6px; }
   .topbar .spacer { flex:1; }
   .side { border-right:1px solid var(--rule); background:#fff; padding:.6rem .4rem; overflow-y:auto; }
-  .side div { padding:.55rem .8rem; border-radius:8px; cursor:pointer; margin-bottom:.15rem; }
+  .side div { padding:.55rem .8rem; border-radius:8px; cursor:pointer; margin-bottom:.15rem; white-space:nowrap; }
   .side div:hover { background:var(--soft); }
   .side div.active { background:var(--soft); color:var(--accent); font-weight:700; }
-  .main { overflow-y:auto; padding:1rem 1.2rem; }
+  .main { overflow:auto; padding:1rem 1.2rem; }
   .rpanel { border-left:1px solid var(--rule); background:#fff; padding:.8rem; overflow-y:auto; }
   .rpanel h4 { font-size:.8rem; color:var(--accent); margin:.6rem 0 .3rem; }
   .rpanel .kv { display:flex; justify-content:space-between; font-size:.8rem; padding:.15rem 0; }
+  .rpanel .sum-group { font-size:.7rem; color:var(--accent); border-top:1px dashed var(--rule); margin-top:.45rem; padding-top:.4rem; }
+  .rpanel .sum-group:first-child { border-top:none; margin-top:0; padding-top:0; }
+  .rpanel .kv b.chip-link { cursor:pointer; color:var(--accent); text-decoration:underline; }
   .rpanel .remind { background:var(--amber-soft); border-radius:6px; padding:.4rem .5rem; font-size:.75rem; margin-bottom:.3rem; }
   .card { background:#fff; border:1px solid var(--rule); border-radius:10px; padding:.8rem 1rem; margin-bottom:.8rem; }
   .bubble { max-width:88%; margin-bottom:.7rem; padding:.55rem .8rem; border-radius:10px; white-space:pre-wrap; font-size:.88rem; }
@@ -39,8 +42,9 @@
   button { padding:.4rem .9rem; border:none; border-radius:6px; background:var(--accent); color:#fff; cursor:pointer; font-size:.85rem; }
   button.ghost { background:#fff; color:var(--accent); border:1px solid var(--accent); }
   button.danger { background:var(--danger); }
+  button.small { padding:.15rem .5rem; font-size:.75rem; }
   button:disabled { background:#ccc; cursor:not-allowed; }
-  .vc-line { display:grid; grid-template-columns:1fr 140px 120px 90px 90px 26px; gap:.35rem; margin-bottom:.35rem; align-items:center; }
+  .vc-line { display:grid; grid-template-columns:1fr 140px 110px 110px 90px 90px 26px; gap:.35rem; margin-bottom:.35rem; align-items:center; }
   .vc-totals { display:flex; gap:1.2rem; justify-content:flex-end; font-family:Consolas,monospace; font-size:.85rem; padding:.4rem 0; }
   .diff-bad { color:var(--danger); font-weight:700; }
   .diff-ok { color:var(--accent); font-weight:700; }
@@ -52,10 +56,35 @@
   #loginView input { width:100%; margin-bottom:.7rem; }
   .inputbar { display:flex; gap:.5rem; align-items:center; background:#fff; border:1px solid var(--rule); border-radius:10px; padding:.5rem; position:sticky; bottom:.5rem; }
   .inputbar input[type=text] { flex:1; border:none; outline:none; }
+  .chat-panel { position:fixed; right:20px; bottom:20px; width:420px; height:560px; max-width:calc(100vw - 32px); max-height:calc(100vh - 32px); min-width:min(320px, calc(100vw - 32px)); min-height:280px; overflow:hidden; background:var(--bg); border:1px solid var(--rule); border-radius:12px; box-shadow:0 12px 40px rgba(31,39,51,.22); z-index:60; display:flex; flex-direction:column; }
+  .chat-panel-head { display:flex; align-items:center; gap:.5rem; padding:.55rem .8rem; background:#fff; border-bottom:1px solid var(--rule); cursor:move; user-select:none; font-weight:700; flex:none; }
+  .chat-panel-head .spacer { flex:1; }
+  .chat-panel-head button { padding:.05rem .55rem; font-size:.95rem; line-height:1.3; }
+  .chat-panel-body { display:flex; flex-direction:column; flex:1; min-height:0; padding:.5rem .7rem; }
+  .chat-panel.collapsed { height:auto !important; min-height:0; max-height:none; }
+  .chat-panel.collapsed .chat-panel-body { display:none; }
   .badge { font-size:.72rem; padding:.1rem .5rem; border-radius:10px; background:var(--soft); color:var(--accent); font-weight:700; }
   .badge.gray { background:#eee; color:var(--muted); }
   h3.view-title { margin-bottom:.8rem; }
   a.link { color:var(--accent); text-decoration:underline; cursor:pointer; }
+
+  /* ---- 响应式适配 ---- */
+  @media (max-width:1024px) {
+    .layout { grid-template-columns:150px minmax(0,1fr); }
+    .rpanel { display:none; }
+  }
+  @media (max-width:680px) {
+    .layout { grid-template-columns:minmax(0,1fr); grid-template-rows:auto auto minmax(0,1fr); height:100vh; height:100dvh; }
+    .topbar { grid-column:1; padding:.45rem .6rem; gap:.5rem; }
+    .side { grid-column:1; display:flex; overflow-x:auto; overflow-y:hidden; border-right:none; border-bottom:1px solid var(--rule); padding:.3rem .4rem; }
+    .side div { margin-bottom:0; padding:.4rem .65rem; flex:none; }
+    .main { grid-column:1; padding:.8rem .7rem; }
+    .card { overflow-x:auto; }
+    .vc-line { min-width:600px; }
+    table { min-width:520px; }
+    .bubble { max-width:96%; }
+  }
+
 </style>
 </head>
 <body>
@@ -79,8 +108,8 @@
   </div>
 
   <div class="side" id="sideNav">
-    <div class="active" data-view="chat">💬 对话记账</div>
-    <div data-view="vouchers">📋 凭证</div>
+    <div data-view="chat">💬 记账助手</div>
+    <div class="active" data-view="vouchers">📋 凭证</div>
     <div data-view="accounts">🗂 科目设置</div>
     <div data-view="contacts">🤝 往来单位</div>
     <div data-view="tb">📊 科目余额表</div>
@@ -100,6 +129,16 @@
     <h4>💡 本期概要</h4>
     <div id="rp_summary">…</div>
   </div>
+
+  <div id="chatPanel" class="chat-panel hidden">
+    <div class="chat-panel-head" id="chatPanelHead">
+      <span>💬 记账助手</span>
+      <span class="spacer"></span>
+      <button class="ghost" id="cpCollapse" onclick="collapseChatPanel()">—</button>
+      <button class="ghost" onclick="toggleChatPanel(false)">×</button>
+    </div>
+    <div id="chatPanelBody" class="chat-panel-body"></div>
+  </div>
 </div>
 
 <script>
@@ -109,7 +148,7 @@ let BOOK = { id: 1, name: '' };
 let PERIOD = new Date().toISOString().slice(0, 7);
 let ACCOUNTS = [];
 let CONTACTS = [];
-let currentView = 'chat';
+let currentView = 'vouchers';
 let chatLog = [];
 
 const $ = id => document.getElementById(id);
@@ -118,6 +157,14 @@ const SOURCE_CN = { manual:'手工', ai:'AI生成', carryover:'结转', reverse:
 const ROLE_CN = { admin:'管理员', bookkeeper:'制单', auditor:'审核' };
 const CTYPE_CN = { customer:'客户', supplier:'供应商', employee:'员工', other:'其他往来' };
 
+async function errorText(resp) {
+  const data = await resp.json().catch(() => ({}));
+  const d = data.detail;
+  if (typeof d === 'string') return d;
+  if (Array.isArray(d) && d.length) return d.map(x => x.msg || JSON.stringify(x)).join('；');
+  return 'HTTP ' + resp.status;
+}
+
 async function api(path, options = {}) {
   const resp = await fetch(path, {
     ...options,
@@ -125,10 +172,7 @@ async function api(path, options = {}) {
   });
   if (resp.status === 401) { logout(true); throw new Error('登录已失效'); }
   if (resp.status === 204) return null;
-  if (!resp.ok) {
-    const detail = await resp.json().catch(() => ({}));
-    throw new Error(detail.detail || ('HTTP ' + resp.status));
-  }
+  if (!resp.ok) throw new Error(await errorText(resp));
   return resp.json();
 }
 
@@ -166,7 +210,10 @@ async function boot() {
   $('mainView').classList.remove('hidden');
   await loadMasters();
   await Promise.all([loadReminders(), loadSummary()]);
-  switchView('chat');
+  renderChat();
+  restoreChatPanelRect();
+  toggleChatPanel(true);
+  switchView('vouchers');
 }
 
 async function loadMasters() {
@@ -182,13 +229,103 @@ async function loadMasters() {
 
 function onPeriodChange() { PERIOD = $('period').value; loadSummary(); if (currentView !== 'chat') switchView(currentView); }
 
+function updateNav() {
+  const chatOpen = !$('chatPanel').classList.contains('hidden');
+  document.querySelectorAll('#sideNav div').forEach(el => {
+    const v = el.dataset.view;
+    el.classList.toggle('active', v === 'chat' ? chatOpen : v === currentView);
+  });
+}
+
 function switchView(view) {
-  currentView = view;
-  document.querySelectorAll('#sideNav div').forEach(el => el.classList.toggle('active', el.dataset.view === view));
+  if (view === 'chat') { toggleChatPanel(); return; }
   if (view === 'llm') { window.open('/settings', '_blank'); return; }
-  ({ chat: renderChat, vouchers: renderVouchers, accounts: renderAccounts, contacts: renderContactsView, tb: renderTB, reports: renderReports,
+  currentView = view;
+  updateNav();
+  ({ vouchers: renderVouchers, accounts: renderAccounts, contacts: renderContactsView, tb: renderTB, reports: renderReports,
      opening: renderOpening, invoices: renderInvoices, tax: renderTax, users: renderUsers })[view]();
 }
+
+(function initChatPanelDrag() {
+  const head = $('chatPanelHead'), panel = $('chatPanel');
+  let dragging = null;
+  head.addEventListener('mousedown', e => {
+    if (e.target.tagName === 'BUTTON') return;
+    const rect = panel.getBoundingClientRect();
+    // 靠近边缘的按下交给边缘缩放处理
+    const nx = e.clientX - rect.left, ny = e.clientY - rect.top;
+    if (nx <= CHAT_EDGE || nx >= rect.width - CHAT_EDGE || ny <= CHAT_EDGE) return;
+    panel.style.left = rect.left + 'px'; panel.style.top = rect.top + 'px';
+    panel.style.right = 'auto'; panel.style.bottom = 'auto';
+    dragging = { dx: e.clientX - rect.left, dy: e.clientY - rect.top };
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    let x = e.clientX - dragging.dx, y = e.clientY - dragging.dy;
+    x = Math.max(0, Math.min(x, window.innerWidth - 60));
+    y = Math.max(0, Math.min(y, window.innerHeight - 40));
+    panel.style.left = x + 'px'; panel.style.top = y + 'px';
+  });
+  document.addEventListener('mouseup', () => { dragging = null; saveChatPanelRect(); });
+})();
+
+/* 八方向边缘缩放：四条边 + 四个角均可拖拽调整窗口大小 */
+const CHAT_EDGE = 7, CHAT_MIN_W = 320, CHAT_MIN_H = 280;
+const CHAT_CURSORS = { nw:'nwse-resize', se:'nwse-resize', ne:'nesw-resize', sw:'nesw-resize', n:'ns-resize', s:'ns-resize', e:'ew-resize', w:'ew-resize' };
+function chatEdgeAt(e) {
+  const p = $('chatPanel');
+  if (!p || p.classList.contains('hidden') || p.classList.contains('collapsed')) return null;
+  const r = p.getBoundingClientRect();
+  const nx = e.clientX - r.left, ny = e.clientY - r.top;
+  const nearL = nx >= -CHAT_EDGE && nx <= CHAT_EDGE;
+  const nearR = nx >= r.width - CHAT_EDGE && nx <= r.width + CHAT_EDGE;
+  const nearT = ny >= -CHAT_EDGE && ny <= CHAT_EDGE;
+  const nearB = ny >= r.height - CHAT_EDGE && ny <= r.height + CHAT_EDGE;
+  if (nearL && nearT) return 'nw';
+  if (nearR && nearT) return 'ne';
+  if (nearL && nearB) return 'sw';
+  if (nearR && nearB) return 'se';
+  if (nearL) return 'w';
+  if (nearR) return 'e';
+  if (nearT) return 'n';
+  if (nearB) return 's';
+  return null;
+}
+(function initChatPanelResize() {
+  const panel = $('chatPanel');
+  let rz = null;
+  document.addEventListener('mousemove', e => {
+    if (rz) {
+      const r = rz.orig;
+      let w = r.w, h = r.h, x = r.x, y = r.y;
+      if (rz.dir.includes('e')) w = Math.max(CHAT_MIN_W, Math.min(e.clientX - r.x, window.innerWidth - r.x));
+      if (rz.dir.includes('s')) h = Math.max(CHAT_MIN_H, Math.min(e.clientY - r.y, window.innerHeight - r.y));
+      if (rz.dir.includes('w')) {
+        const nx = Math.max(0, Math.min(e.clientX, r.x + r.w - CHAT_MIN_W));
+        w = r.x + r.w - nx; x = nx;
+      }
+      if (rz.dir.includes('n')) {
+        const ny = Math.max(0, Math.min(e.clientY, r.y + r.h - CHAT_MIN_H));
+        h = r.y + r.h - ny; y = ny;
+      }
+      panel.style.left = x + 'px'; panel.style.top = y + 'px';
+      panel.style.width = w + 'px'; panel.style.height = h + 'px';
+      return;
+    }
+    const dir = chatEdgeAt(e);
+    panel.style.cursor = dir ? CHAT_CURSORS[dir] : '';
+  });
+  document.addEventListener('mousedown', e => {
+    if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    const dir = chatEdgeAt(e);
+    if (!dir) return;
+    const r = panel.getBoundingClientRect();
+    rz = { dir, orig: { x: r.left, y: r.top, w: r.width, h: r.height } };
+    e.preventDefault();
+  });
+  document.addEventListener('mouseup', () => { if (rz) { rz = null; saveChatPanelRect(); fitVoucherLines(); } });
+})();
 
 function addBubble(html, cls = 'ai') {
   chatLog.push({ html, cls });
@@ -198,13 +335,13 @@ function addBubble(html, cls = 'ai') {
   const flow = $('chatFlow');
   if (!flow) return;
   flow.appendChild(wrap);
-  flow.parentElement.scrollTop = flow.parentElement.scrollHeight;
+  flow.scrollTop = flow.scrollHeight;
 }
 
-/* ---------- 对话视图 ---------- */
+/* ---------- 对话视图（悬浮助手窗） ---------- */
 function renderChat() {
-  $('mainArea').innerHTML = `
-    <div id="chatFlow" style="height:calc(100vh - 190px); overflow-y:auto; padding-right:.3rem"></div>
+  $('chatPanelBody').innerHTML = `
+    <div id="chatFlow" style="flex:1; min-height:0; overflow-y:auto; padding-right:.3rem"></div>
     <div class="chips" id="chips"></div>
     <div class="inputbar">
       <input type="file" id="chatFile" class="hidden">
@@ -225,6 +362,69 @@ function renderChat() {
   $('chatFile').onchange = () => { if ($('chatFile').files[0]) send(); };
 }
 
+function toggleChatPanel(show) {
+  const panel = $('chatPanel');
+  const visible = show === undefined ? panel.classList.contains('hidden') : show;
+  panel.classList.toggle('hidden', !visible);
+  updateNav();
+  if (visible) { const flow = $('chatFlow'); if (flow) flow.scrollTop = flow.scrollHeight; }
+}
+
+let _chatRectCache = '';
+function saveChatPanelRect() {
+  const p = $('chatPanel');
+  if (p.classList.contains('hidden') || p.classList.contains('collapsed')) return;
+  const r = p.getBoundingClientRect();
+  const data = JSON.stringify({ x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) });
+  if (data === _chatRectCache) return;
+  _chatRectCache = data;
+  try { localStorage.setItem('ledger_chat_rect', data); } catch (e) {}
+}
+
+function restoreChatPanelRect() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('ledger_chat_rect') || 'null');
+    if (!saved) return;
+    const p = $('chatPanel');
+    const minW = Math.min(320, window.innerWidth - 32);
+    p.style.left = Math.max(0, Math.min(saved.x, window.innerWidth - 60)) + 'px';
+    p.style.top = Math.max(0, Math.min(saved.y, window.innerHeight - 40)) + 'px';
+    p.style.right = 'auto'; p.style.bottom = 'auto';
+    p.style.width = Math.max(minW, Math.min(saved.w, window.innerWidth - 32)) + 'px';
+    p.style.height = Math.max(280, Math.min(saved.h, window.innerHeight - 32)) + 'px';
+  } catch (e) {}
+}
+
+// 浏览器窗口尺寸变化时，把悬浮窗拉回可视区域并保存新位置
+window.addEventListener('resize', () => {
+  const p = $('chatPanel');
+  if (!p || p.classList.contains('hidden') || p.classList.contains('collapsed')) return;
+  const r = p.getBoundingClientRect();
+  const minW = Math.min(320, window.innerWidth - 32);
+  const x = Math.max(0, Math.min(r.left, window.innerWidth - 60));
+  const y = Math.max(0, Math.min(r.top, window.innerHeight - 40));
+  const w = Math.max(minW, Math.min(r.width, window.innerWidth - 32));
+  const h = Math.max(280, Math.min(r.height, window.innerHeight - 32));
+  p.style.left = x + 'px'; p.style.top = y + 'px';
+  p.style.width = w + 'px'; p.style.height = h + 'px';
+  saveChatPanelRect();
+});
+
+let _chatPanelH = '';
+function collapseChatPanel() {
+  const panel = $('chatPanel');
+  const collapsed = panel.classList.toggle('collapsed');
+  if (collapsed) {
+    _chatPanelH = panel.style.height;   // 记住展开时的高度，清掉内联让 CSS height:auto 生效
+    panel.style.height = '';
+  } else {
+    panel.style.height = _chatPanelH || '';
+    const flow = $('chatFlow'); if (flow) flow.scrollTop = flow.scrollHeight;
+    fitVoucherLines();
+  }
+  $('cpCollapse').textContent = collapsed ? '▢' : '—';
+}
+
 function contactOptions(selected, allowedTypes) {
   const usable = CONTACTS.filter(c =>
     c.is_active && (!allowedTypes || !allowedTypes.length || allowedTypes.includes(c.ctype)));
@@ -239,8 +439,21 @@ function auxTypesOf(accountCode) {
     .split(',').filter(Boolean).map(x => x.replace('contact:', '')).filter(x => x !== 'contact');
 }
 
+let _edSeq = 0;
+const CF_ITEMS = {
+  sales: '销售收现', invest_return: '投资收益', asset_dispose: '处置资产', capital_in: '吸收投资', borrow_in: '取得借款', other_in: '其他经营收现',
+  purchase: '购买商品', staff: '职工薪酬', taxes: '税费', capex: '购建资产', invest_out: '投资支付', borrow_repay: '偿还债务', dividend: '分红付息', other_out: '其他经营付现',
+};
+const isCashAcct = code => ['1001', '1002', '1012'].includes(String(code || '').slice(0, 4));
+function cfSelectHTML(line, i, updFn) {
+  if (!isCashAcct(line.account_code)) return '<span></span>';
+  return `<select onchange="${updFn}(${i},'cf_item',this.value||null)" title="现金流量项目">
+    <option value="">现金流量</option>
+    ${Object.entries(CF_ITEMS).map(([k, label]) => `<option value="${k}" ${line.cf_item === k ? 'selected' : ''}>${label}</option>`).join('')}
+  </select>`;
+}
 function lineEditorHTML(lines, updFn, delFn) {
-  return lines.map((line, i) => `
+  return `<div class="vc-lines-box">` + lines.map((line, i) => `
     <div class="vc-line">
       <input value="${line.summary || ''}" placeholder="摘要" onchange="${updFn}(${i},'summary',this.value)">
       <select onchange="${updFn}(${i},'account_code',this.value)">
@@ -251,10 +464,40 @@ function lineEditorHTML(lines, updFn, delFn) {
       <select onchange="${updFn}(${i},'contact_id',this.value?parseInt(this.value):null)">
         ${contactOptions(line.contact_id, auxTypesOf(line.account_code))}
       </select>
-      <input class="num" value="${line.debit || ''}" placeholder="借方" onchange="${updFn}(${i},'debit',this.value)">
-      <input class="num" value="${line.credit || ''}" placeholder="贷方" onchange="${updFn}(${i},'credit',this.value)">
+      ${cfSelectHTML(line, i, updFn)}
+      <input class="num" data-field="debit" value="${line.debit || ''}" placeholder="借方（按=平衡）" onchange="amtChange(this,'${updFn}',${i},'debit')" onkeydown="amtKey(event,this)">
+      <input class="num" data-field="credit" value="${line.credit || ''}" placeholder="贷方（按=平衡）" onchange="amtChange(this,'${updFn}',${i},'credit')" onkeydown="amtKey(event,this)">
       <button class="small danger" onclick="${delFn}(${i})">×</button>
-    </div>`).join('');
+    </div>`).join('') + '</div>';
+}
+
+/* 金额工具：解析任意输入为数字（容错空串/千分位逗号/货币符），失焦格式化两位小数，按 = 填平衡金额 */
+function amtNum(v) { const n = parseFloat(String(v ?? '').replace(/[,\s¥￥]/g, '')); return isNaN(n) ? 0 : n; }
+
+function amtChange(input, updFn, i, field) {
+  const raw = String(input.value).trim();
+  input.value = raw === '' ? '' : amtNum(raw).toFixed(2);
+  window[updFn](i, field, input.value);
+}
+
+function amtKey(e, input) {
+  if (e.key !== '=') return;
+  e.preventDefault();
+  const scope = input.closest('.vc-lines-box') || document;
+  let debit = 0, credit = 0;
+  scope.querySelectorAll('input.num[data-field]').forEach(inp => {
+    if (inp === input) return;
+    if (inp.dataset.field === 'debit') debit += amtNum(inp.value);
+    else credit += amtNum(inp.value);
+  });
+  // 贷方：借合计-贷合计；借方：贷合计-借合计（排除本行，可为负，负号表示应记对方方向）
+  const val = input.dataset.field === 'credit' ? debit - credit : credit - debit;
+  input.value = val.toFixed(2);
+  input.dispatchEvent(new Event('change'));
+}
+
+function normLines(lines) {
+  return lines.map(l => ({ ...l, debit: amtNum(l.debit).toFixed(2), credit: amtNum(l.credit).toFixed(2) }));
 }
 
 function totalsHTML(lines) {
@@ -273,7 +516,7 @@ function cardHTML(v, mode) {
         <b>附单据数</b><input id="vc_att" type="number" min="0" value="${v.attachment_count ?? 1}" style="width:60px">
         <span class="badge ${mode === 'ai' ? '' : 'gray'}">${mode === 'ai' ? 'AI 生成 · 可编辑' : '手工录入'}</span>
       </div>
-      <div class="vc-line" style="font-weight:700;color:var(--muted)"><span>摘要</span><span>科目</span><span>往来单位</span><span style="text-align:right">借方</span><span style="text-align:right">贷方</span><span></span></div>
+      <div class="vc-line" style="font-weight:700;color:var(--muted)"><span>摘要</span><span>科目</span><span>往来单位</span><span>现金流量</span><span style="text-align:right">借方</span><span style="text-align:right">贷方</span><span></span></div>
       ${lineEditorHTML(v.lines, 'updLine', 'delLine')}
       <button class="small ghost" onclick="addLine()">＋ 加一行</button>
       ${t.html}
@@ -288,14 +531,29 @@ let cardState = { mode: 'ai', voucher: null, docId: null };
 function showCard(mode, voucher, docId) {
   cardState = { mode, voucher, docId };
   addBubble(cardHTML(voucher, mode));
+  fitVoucherLines();
 }
 
 function updLine(i, field, value) { cardState.voucher.lines[i][field] = value; refreshCardTotals(); }
-function addLine() { cardState.voucher.lines.push({ summary: '', account_code: '', contact_id: null, debit: '', credit: '' }); rerenderCard(); }
+function addLine() { cardState.voucher.lines.push({ summary: '', account_code: '', contact_id: null, cf_item: null, debit: '', credit: '' }); rerenderCard(); }
 function delLine(i) { cardState.voucher.lines.splice(i, 1); rerenderCard(); }
+
+/* 凭证分录行整体缩放：容器窄于行自然宽度时等比缩小，保证借贷框始终完整可见 */
+function fitVoucherLines() {
+  document.querySelectorAll('.vc-fit').forEach(fit => {
+    fit.style.zoom = '';
+    const ps = getComputedStyle(fit.parentElement);
+    const avail = fit.parentElement.clientWidth - (parseFloat(ps.paddingLeft) + parseFloat(ps.paddingRight) || 0);
+    const nat = fit.scrollWidth;
+    if (nat > avail && nat > 0) fit.style.zoom = Math.max(0.55, avail / nat).toFixed(3);
+  });
+}
+window.addEventListener('resize', fitVoucherLines);
+
 function rerenderCard() {
   const card = document.getElementById('vcCard');
-  if (card) { card.outerHTML = cardHTML(cardState.voucher, cardState.mode); $('chatFlow').parentElement.scrollTop = $('chatFlow').parentElement.scrollHeight; }
+  if (card) { card.outerHTML = cardHTML(cardState.voucher, cardState.mode); const f = $('chatFlow'); f.scrollTop = f.scrollHeight; }
+  fitVoucherLines();
 }
 function refreshCardTotals() {
   const card = document.getElementById('vcCard');
@@ -306,12 +564,12 @@ function refreshCardTotals() {
 }
 
 function newManualCard() {
-  if (currentView !== 'chat') switchView('chat');
+  toggleChatPanel(true);
   showCard('manual', {
     voucher_date: new Date().toISOString().slice(0, 10),
     lines: [
-      { summary: '', account_code: '', contact_id: null, debit: '', credit: '' },
-      { summary: '', account_code: '', contact_id: null, debit: '', credit: '' },
+      { summary: '', account_code: '', contact_id: null, cf_item: null, debit: '', credit: '' },
+      { summary: '', account_code: '', contact_id: null, cf_item: null, debit: '', credit: '' },
     ],
     attachment_count: 1,
   });
@@ -321,7 +579,9 @@ let CHAT_HISTORY = [];
 let pendingAsk = null;
 const TOOL_CN = {
   search_invoices: '查发票', query_balance: '查科目余额', query_vouchers: '查凭证',
-  list_contacts: '查往来单位', find_or_create_contact: '建档往来单位', ask_user: '向用户提问',
+  list_contacts: '列往来单位', search_contacts: '查往来档案', find_or_create_contact: '新建往来单位', ask_user: '向用户提问',
+  check_duplicate: '重复入账检测', 'check_duplicate(hard)': '重复入账检测（系统强制）',
+  'sanitize_contacts(hard)': '往来单位校验（系统强制）',
 };
 
 async function send() {
@@ -350,12 +610,16 @@ async function send() {
       const form = new FormData();
       form.append('file', file);
       const resp = await fetch(`/api/ai/parse?book_id=${BOOK.id}`, { method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN }, body: form });
-      if (!resp.ok) throw new Error((await resp.json()).detail || '解析失败');
+      if (!resp.ok) throw new Error(await errorText(resp));
       doc = await resp.json();
       const warnHtml = (doc.warnings || []).map(w => `<div class="warn">⚠ ${w}</div>`).join('');
       addBubble(`📄 已解析（${doc.source_kind}）：${Object.values(doc.fields).filter(v => v).join(' ｜ ') || '无字段'}${warnHtml}`);
     } else {
-      doc = await api('/api/ai/parse', { method: 'POST', body: JSON.stringify({ book_id: BOOK.id, note: text }) });
+      const form = new FormData();
+      form.append('note', text);
+      const resp = await fetch(`/api/ai/parse?book_id=${BOOK.id}`, { method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN }, body: form });
+      if (!resp.ok) throw new Error(await errorText(resp));
+      doc = await resp.json();
     }
     CHAT_HISTORY.push({ role: 'user', content: text || `[文件] ${file.name}` });
     await agentChat(doc.doc_id);
@@ -363,17 +627,23 @@ async function send() {
 }
 
 async function agentChat(docId) {
-  const body = $('chatBox');
+  const body = $('chatFlow');
   const thinking = document.createElement('div');
   thinking.className = 'bubble ai';
   thinking.textContent = '⏳ 正在思考（可能需要查数据）…';
   body.appendChild(thinking); body.scrollTop = body.scrollHeight;
-  const data = await api('/api/ai/chat', {
-    method: 'POST',
-    body: JSON.stringify({ book_id: BOOK.id, doc_id: docId, history: CHAT_HISTORY }),
-  });
-  thinking.remove();
+  let data;
+  try {
+    data = await api('/api/ai/chat', {
+      method: 'POST',
+      body: JSON.stringify({ book_id: BOOK.id, doc_id: docId, history: CHAT_HISTORY }),
+    });
+  } finally {
+    thinking.remove();
+  }
   (data.trace || []).forEach(t => addTrace(t));
+  // 智能体可能新建了往来档案：先刷新主数据缓存，凭证卡片下拉才能选到新档案
+  if ((data.trace || []).some(t => t.tool === 'find_or_create_contact')) await loadMasters();
   CHAT_HISTORY.push({ role: 'assistant', content: data.reply });
   if (data.stopped_by_ask_user) {
     pendingAsk = { docId };
@@ -382,7 +652,7 @@ async function agentChat(docId) {
   }
   pendingAsk = null;
   if (data.voucher) {
-    data.voucher.lines.forEach(l => { if (l.contact_id === undefined) l.contact_id = null; });
+    data.voucher.lines.forEach(l => { if (l.contact_id === undefined) l.contact_id = null; if (l.cf_item === undefined) l.cf_item = null; });
     addBubble(`🤖 ${data.reply || '凭证已生成，请核对：'}`);
     showCard('ai', data.voucher, docId);
   } else {
@@ -391,7 +661,7 @@ async function agentChat(docId) {
 }
 
 function addTrace(t) {
-  const box = $('chatBox');
+  const box = $('chatFlow');
   const args = Object.entries(t.arguments || {}).map(([k, v]) => (v ? `${k}=${v}` : '')).filter(Boolean).join(' ');
   const div = document.createElement('div');
   div.className = 'trace';
@@ -414,62 +684,202 @@ async function confirmCard(mode) {
     if (mode === 'ai') {
       voucher = await api('/api/ai/confirm', {
         method: 'POST',
-        body: JSON.stringify({ doc_id: cardState.docId, voucher_date, lines: cardState.voucher.lines }),
+        body: JSON.stringify({ doc_id: cardState.docId, voucher_date, lines: normLines(cardState.voucher.lines) }),
       });
     } else {
       voucher = await api(`/api/vouchers?book_id=${BOOK.id}`, {
         method: 'POST',
-        body: JSON.stringify({ voucher_date, attachment_count, source: 'manual', lines: cardState.voucher.lines }),
+        body: JSON.stringify({ voucher_date, attachment_count, source: 'manual', lines: normLines(cardState.voucher.lines) }),
       });
     }
     addBubble(`✅ 已落账：${voucher.voucher_no_display}（${STATUS_CN[voucher.status]}，待审核）`);
     document.getElementById('vcCard').remove();
-    pendingAsk = null; loadSummary(); if (currentView === 'vouchers') renderVouchers();
+    pendingAsk = null; loadSummary(); if (currentView === 'vouchers') renderVouchers(); if (currentView === 'invoices') renderInvoices();
   } catch (e) { errEl.textContent = '确认失败：' + e.message; }
 }
 
 /* ---------- 凭证模块 ---------- */
 let VE = null;
+let V_STATUS = '';       // 状态筛选（跨重渲染保留，修复选中即重置的 bug）
+let V_PERIOD = '';        // 凭证模块独立期间选择（默认跟全局 PERIOD）
+let V_SEL = new Set();   // 批量操作勾选的凭证 id
+let V_MSG = '';          // 批量操作结果提示
 
 async function renderVouchers() {
-  $('mainArea').innerHTML = `<h3 class="view-title">📋 凭证（${PERIOD}）
-    <select id="v_status" onchange="renderVouchers()" style="margin-left:.8rem">
-      <option value="">全部状态</option>${Object.keys(STATUS_CN).map(s => `<option value="${s}">${STATUS_CN[s]}</option>`).join('')}
+  if (!V_PERIOD) V_PERIOD = PERIOD;
+  $('mainArea').innerHTML = `<h3 class="view-title">📋 凭证
+    <input type="month" value="${V_PERIOD}" onchange="vPeriodChanged(this.value)" style="margin-left:.6rem">
+    <select onchange="vStatusChanged(this.value)" style="margin-left:.6rem">
+      <option value="">全部状态</option>${Object.keys(STATUS_CN).map(s => `<option value="${s}" ${V_STATUS === s ? 'selected' : ''}>${STATUS_CN[s]}</option>`).join('')}
     </select>
-    <button class="ghost small" style="margin-left:.8rem" onclick="newManualCard()">＋ 新建凭证</button></h3><div id="v_list">加载中…</div>`;
-  const status = $('v_status').value;
-  const list = await api(`/api/vouchers?book_id=${BOOK.id}&period=${PERIOD}${status ? '&status=' + status : ''}`);
-  $('v_list').innerHTML = list.length ? `<table><tr><th>凭证号</th><th>日期</th><th>状态</th><th>来源</th><th class="num">金额</th><th>操作</th></tr>` +
-    list.map(v => `<tr><td><a class="link" onclick="viewVoucher(${v.id})">${v.voucher_no_display}</a></td>
+    <button class="ghost small" style="margin-left:.6rem" onclick="newManualCard()">＋ 新建凭证</button></h3>
+    ${V_MSG ? `<div class="result" style="margin-bottom:.5rem">${V_MSG}</div>` : ''}
+    <div id="v_batch"></div><div id="v_list">加载中…</div>`;
+  vRenderToolbar();
+  const list = await api(`/api/vouchers?book_id=${BOOK.id}&period=${V_PERIOD}${V_STATUS ? '&status=' + V_STATUS : ''}`);
+  const ids = new Set(list.map(v => v.id));
+  V_SEL = new Set([...V_SEL].filter(id => ids.has(id)));
+  $('v_list').innerHTML = list.length ? `<table><tr><th style="width:2rem"><input type="checkbox" onchange="vToggleAll(this)" ${list.length && list.every(v => V_SEL.has(v.id)) ? 'checked' : ''}></th><th>凭证号</th><th>日期</th><th>状态</th><th>来源</th><th class="num">金额</th><th>操作</th></tr>` +
+    list.map(v => `<tr><td><input type="checkbox" data-id="${v.id}" ${V_SEL.has(v.id) ? 'checked' : ''} onchange="vToggle(${v.id}, this.checked)"></td>
+      <td><a class="link" onclick="viewVoucher(${v.id})">${v.voucher_no_display}</a></td>
       <td>${v.voucher_date}</td><td>${STATUS_CN[v.status] || v.status}</td><td>${SOURCE_CN[v.source] || v.source}</td><td class="num">${v.total_debit}</td>
       <td><button class="small ghost" onclick="viewVoucher(${v.id})">查看${v.status === 'draft' ? '/编辑' : ''}</button></td></tr>`).join('') + '</table>'
     : '<div class="result">本期暂无凭证</div>';
 }
 
+function vStatusChanged(v) { V_STATUS = v; V_SEL.clear(); V_MSG = ''; renderVouchers(); }
+function vPeriodChanged(p) { if (p) { V_PERIOD = p; V_SEL.clear(); V_MSG = ''; renderVouchers(); } }
+function vToggle(id, checked) { checked ? V_SEL.add(id) : V_SEL.delete(id); vRenderToolbar(); }
+function vToggleAll(cb) {
+  document.querySelectorAll('#v_list input[type=checkbox][data-id]').forEach(c => {
+    const id = parseInt(c.dataset.id);
+    if (id) { cb.checked ? V_SEL.add(id) : V_SEL.delete(id); c.checked = cb.checked; }
+  });
+  vRenderToolbar();
+}
+
+function vRenderToolbar() {
+  const bar = $('v_batch');
+  if (!bar) return;
+  const n = V_SEL.size;
+  const dis = n ? '' : ' disabled title="先勾选凭证左侧的复选框"';
+  const b = (label, action, cls) => `<button class="small ${cls || 'ghost'}" style="margin-right:.35rem" onclick="vBatch('${action}')" ${dis}>${label}</button>`;
+  bar.innerHTML = `<div class="card" style="padding:.45rem .7rem;display:flex;gap:.35rem;align-items:center;margin-bottom:.6rem;flex-wrap:wrap">
+    <span style="margin-right:.3rem;font-size:.85rem">已选 <b>${n}</b> 条</span>
+    ${b('提交审核', 'submit', '')}
+    ${ROLE !== 'bookkeeper' ? b('审核通过', 'audit', '') + b('驳回', 'reject', '') + b('过账', 'post', '') + b('反过账', 'unpost', '') : ''}
+    ${b('删除草稿', 'delete', 'danger')}</div>`;
+}
+
+async function vBatch(action) {
+  const labels = { submit: '提交审核', audit: '审核通过', reject: '驳回', post: '过账', unpost: '反过账', delete: '删除' };
+  if (action === 'delete' && !confirm(`确定删除选中的 ${V_SEL.size} 张凭证？（仅草稿状态可删）`)) return;
+  try {
+    const r = await api('/api/vouchers/batch', { method: 'POST', body: JSON.stringify({ ids: [...V_SEL], action }) });
+    V_SEL.clear();
+    V_MSG = r.failed.length
+      ? `⚠ 已${labels[action]} ${r.ok.length} 条，失败 ${r.failed.length} 条：${r.failed.map(f => `第${f.id}号 ${f.error}`).join('；')}`
+      : `✅ 已${labels[action]} ${r.ok.length} 条`;
+    await renderVouchers();
+    loadSummary();
+  } catch (e) { alert('批量操作失败：' + e.message); }
+}
+
 async function viewVoucher(id) {
   const v = await api(`/api/vouchers/${id}`);
   v.lines.forEach(l => { if (l.contact_id === undefined) l.contact_id = null; });
-  VE = { id, voucher: JSON.parse(JSON.stringify(v)), editable: v.status === 'draft' };
+  VE = { id, voucher: JSON.parse(JSON.stringify(v)), editable: v.status === 'draft', atts: [] };
   renderVoucherDetail();
+  loadAttachments(id);
+}
+
+async function loadAttachments(id) {
+  if (! $('vc_atts_btn')) return;
+  try {
+    VE.atts = await api(`/api/vouchers/${id}/attachments`);
+  } catch (e) { VE.atts = []; }
+  const btn = $('vc_atts_btn');
+  if (btn) btn.textContent = `📎 附件（${VE.atts.length}）`;
+  if ($('att_modal')) renderAttModal();
+}
+
+function fmtSize(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
+
+function toggleAttModal() {
+  if ($('att_modal')) { closeAttModal(); return; }
+  const ov = document.createElement('div');
+  ov.id = 'att_modal';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(31,39,51,.35);z-index:300;display:flex;align-items:center;justify-content:center';
+  ov.onclick = e => { if (e.target === ov) closeAttModal(); };
+  ov.innerHTML = `<div style="background:#fff;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.18);min-width:420px;max-width:560px;max-height:70vh;overflow:auto;padding:1rem 1.2rem">
+    <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.6rem">
+      <b>📎 电子原件（${(VE.atts || []).length}）</b>
+      <button class="small ghost" onclick="$('vc_att_file').click()">＋ 上传</button>
+      <input type="file" id="vc_att_file" class="hidden" multiple onchange="uploadAttachment()">
+      <span style="flex:1"></span>
+      <b style="cursor:pointer;color:var(--muted)" onclick="closeAttModal()" title="关闭">✕</b>
+    </div>
+    <div id="att_list"></div>
+  </div>`;
+  document.body.appendChild(ov);
+  renderAttModal();
+}
+
+function closeAttModal() { const m = $('att_modal'); if (m) m.remove(); }
+
+function renderAttModal() {
+  const box = $('att_list');
+  if (!box) return;
+  const list = VE.atts || [];
+  box.innerHTML = list.length
+    ? `<table><tr><th>文件名</th><th style="width:70px">大小</th><th style="width:130px">操作</th></tr>` +
+      list.map(a => `<tr><td><a class="link" onclick="openAttachment(${a.id})">📎 ${a.original_filename}</a></td><td class="num">${fmtSize(a.file_size)}</td><td><button class="small ghost" onclick="openAttachment(${a.id})">打开</button> <button class="small danger" onclick="delAttachment(${a.id})">删除</button></td></tr>`).join('') + '</table>'
+    : '<div style="color:var(--muted);font-size:.85rem;padding:.6rem 0">暂无电子原件，点「＋ 上传」添加</div>';
+}
+
+async function delAttachment(aid) {
+  const a = (VE.atts || []).find(x => x.id === aid);
+  if (!a || !confirm(`确定删除附件「${a.original_filename}」？`)) return;
+  try {
+    const resp = await fetch(`/api/vouchers/${VE.id}/attachments/${aid}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + TOKEN } });
+    if (!resp.ok && resp.status !== 204) throw new Error(await errorText(resp));
+    VE.atts = VE.atts.filter(x => x.id !== aid);
+    const btn = $('vc_atts_btn'); if (btn) btn.textContent = `📎 附件（${VE.atts.length}）`;
+    renderAttModal();
+    const v = await api(`/api/vouchers/${VE.id}`);
+    if (v && v.attachment_count !== undefined) { $('vc_att_count').textContent = v.attachment_count; }
+  } catch (e) { alert('删除失败：' + e.message); }
+}
+
+async function openAttachment(aid) {
+  try {
+    const resp = await fetch(`/api/vouchers/${VE.id}/attachments/${aid}/download`, { headers: { Authorization: 'Bearer ' + TOKEN } });
+    if (!resp.ok) throw new Error(await errorText(resp));
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) { alert('打开失败：' + e.message); }
+}
+
+async function uploadAttachment() {
+  const files = Array.from($('vc_att_file').files || []);
+  if (!files.length) return;
+  let lastErr = '';
+  for (const f of files) {
+    try {
+      const form = new FormData();
+      form.append('file', f);
+      const resp = await fetch(`/api/vouchers/${VE.id}/attachments`, { method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN }, body: form });
+      if (!resp.ok) lastErr = await errorText(resp);
+    } catch (e) { lastErr = e.message; }
+  }
+  if (lastErr) alert('部分文件上传失败：' + lastErr);
+  const v = await api(`/api/vouchers/${VE.id}`);
+  VE.voucher = v;
+  $('vc_att_count').textContent = v.attachment_count;
+  loadAttachments(VE.id);
 }
 
 function renderVoucherDetail() {
   const v = VE.voucher;
   const contactName = id => (CONTACTS.find(c => c.id === id) || {}).name || '';
+  const acctName = code => { const a = ACCOUNTS.find(x => x.code === code); return a ? a.name : ''; };
   const linesHtml = VE.editable
     ? lineEditorHTML(v.lines, 'veUpd', 'veDel')
-    : `<table><tr><th>摘要</th><th>科目</th><th>往来单位</th><th class="num">借方</th><th class="num">贷方</th></tr>` +
-      v.lines.map(line => `<tr><td>${line.summary}</td><td>${line.account_code}</td><td>${line.contact_id ? contactName(line.contact_id) : ''}</td><td class="num">${line.debit}</td><td class="num">${line.credit}</td></tr>`).join('') + '</table>';
+    : `<table><tr><th>摘要</th><th style="width:80px">科目编码</th><th>科目名称</th><th>往来单位</th><th style="width:90px">现金流量</th><th class="num">借方</th><th class="num">贷方</th></tr>` +
+      v.lines.map(line => `<tr><td>${line.summary}</td><td>${line.account_code}</td><td>${acctName(line.account_code)}</td><td>${line.contact_id ? contactName(line.contact_id) : ''}</td><td>${CF_ITEMS[line.cf_item] || ''}</td><td class="num">${line.debit}</td><td class="num">${line.credit}</td></tr>`).join('') + '</table>';
   const t = totalsHTML(v.lines);
   $('mainArea').innerHTML = `
     <h3 class="view-title"><a class="link" onclick="switchView('vouchers')">← 凭证列表</a>
       ｜ ${v.voucher_no_display} <span class="badge">${STATUS_CN[v.status] || v.status}</span>
       <span class="badge gray">${SOURCE_CN[v.source] || v.source}</span></h3>
     <div class="card">
-      <div style="margin-bottom:.5rem">凭证日期 <b>${v.voucher_date}</b> ｜ 附单据数 <b>${v.attachment_count}</b> ｜ 期间 ${v.period}</div>
+      <div style="margin-bottom:.5rem">凭证日期 <b>${v.voucher_date}</b> ｜ 附单据数 <b id="vc_att_count">${v.attachment_count}</b> ｜ 期间 ${v.period}
+        <button id="vc_atts_btn" class="small ghost" style="margin-left:.6rem" onclick="toggleAttModal()">📎 附件（…）</button></div>
       ${VE.editable ? `
-        <div class="vc-line" style="font-weight:700;color:var(--muted)"><span>摘要</span><span>科目</span><span>往来单位</span><span style="text-align:right">借方</span><span style="text-align:right">贷方</span><span></span></div>
-        ${linesHtml}
+        <div class="vc-fit"><div class="vc-line" style="font-weight:700;color:var(--muted)"><span>摘要</span><span>科目</span><span>往来单位</span><span>现金流量</span><span style="text-align:right">借方</span><span style="text-align:right">贷方</span><span></span></div>
+        ${linesHtml}</div>
         <button class="small ghost" onclick="veAdd()">＋ 加一行</button>
         ${t.html}
         <div id="ve_err" style="color:var(--danger);font-size:.82rem"></div>
@@ -482,15 +892,24 @@ function renderVoucherDetail() {
         ${ROLE !== 'bookkeeper' && v.status === 'audited' ? `<button onclick="act('${v.id}','post')">过账</button>` : ''}
         ${ROLE !== 'bookkeeper' && v.status === 'posted' ? `<button class="ghost" onclick="act('${v.id}','unpost')">反过账</button> <button class="danger" onclick="veReverse()">红字冲销</button>` : ''}`}
     </div>`;
+  fitVoucherLines();
 }
 
-function veUpd(i, field, value) { VE.voucher.lines[i][field] = value; }
+function veUpd(i, field, value) {
+  VE.voucher.lines[i][field] = value;
+  const el = document.querySelector('#mainArea .vc-totals');
+  if (el) {
+    const t = totalsHTML(VE.voucher.lines);
+    el.outerHTML = t.html;
+    const btn = $('veSave'); if (btn) btn.disabled = !t.ok;
+  }
+}
 function veAdd() { VE.voucher.lines.push({ summary: '', account_code: '', contact_id: null, debit: '0', credit: '0' }); renderVoucherDetail(); }
 function veDel(i) { VE.voucher.lines.splice(i, 1); renderVoucherDetail(); }
 
 async function veSave() {
   try {
-    VE.voucher = await api(`/api/vouchers/${VE.id}`, { method: 'PATCH', body: JSON.stringify({ lines: VE.voucher.lines }) });
+    VE.voucher = await api(`/api/vouchers/${VE.id}`, { method: 'PATCH', body: JSON.stringify({ lines: normLines(VE.voucher.lines) }) });
     renderVoucherDetail();
   } catch (e) { $('ve_err').textContent = '保存失败：' + e.message; }
 }
@@ -684,7 +1103,7 @@ let reportTab = 'bs';
 function renderReports() {
   $('mainArea').innerHTML = `<h3 class="view-title">📑 报表模块（${PERIOD}）</h3>
     <div class="chips" id="r_tabs"></div><div id="t_body">加载中…</div>`;
-  [['bs', '资产负债表'], ['is', '利润表'], ['cf', '现金流量表']].forEach(([key, label]) => {
+  [['bs', '资产负债表'], ['is', '利润表'], ['cf', '现金流量表'], ['tpl', '映射体检']].forEach(([key, label]) => {
     const chip = document.createElement('span');
     chip.className = 'chip' + (reportTab === key ? ' on' : '');
     chip.textContent = label;
@@ -705,6 +1124,9 @@ async function loadReport(kind) {
       const r = await api(`/api/reports/income-statement?book_id=${BOOK.id}&period=${PERIOD}`);
       $('t_body').innerHTML = `<table><tr><th>项目</th><th class="num">本月金额</th><th class="num">本年累计金额</th></tr>` +
         r.rows.map(row => `<tr class="${row.bold ? 'total-row' : ''}"><td>${row.name}</td><td class="num">${row.month}</td><td class="num">${row.year_to_date}</td></tr>`).join('') + '</table>';
+    } else if (kind === 'tpl') {
+      TPL_CACHE = await api(`/api/reports/template-check?book_id=${BOOK.id}&period=${PERIOD}`);
+      renderTpl();
     } else {
       const r = await api(`/api/reports/cash-flow?book_id=${BOOK.id}&period=${PERIOD}`);
       $('t_body').innerHTML = `<table><tr><th>项目</th><th class="num">本月金额</th><th class="num">本年累计金额</th></tr>` +
@@ -712,6 +1134,99 @@ async function loadReport(kind) {
         `<div class="result" style="margin-top:.5rem">口径：直接法；现金内部划转已剔除；净增加额与现金类科目变动自动对账。</div>`;
     }
   } catch (e) { $('t_body').innerHTML = `<div class="result" style="color:var(--danger)">加载失败：${e.message}</div>`; }
+}
+
+let TPL_CACHE = null, TPL_EDIT = null;
+function acctLabel(code) { const a = ACCOUNTS.find(x => x.code === code); return a ? a.name : ''; }
+
+function renderTpl() {
+  const r = TPL_CACHE;
+  if (!r) return;
+  const repName = { bs: '资产负债表', is: '利润表' };
+  const unmapped = r.unmapped || [];
+  const unmappedBal = unmapped.filter(a => a.has_balance);
+  const dirty = (r.dirty_refs || []).length
+    ? `<div class="remind">⚠️ 模板引用了账套中不存在的科目：${r.dirty_refs.map(d => `${repName[d.report]} ${d.code}`).join('、')}</div>` : '';
+  const unmappedRows = unmapped.length
+    ? `<table><tr><th>科目</th><th class="num">期末余额</th><th>提示</th></tr>` +
+      unmapped.map(a => `<tr${a.has_balance ? ' style="color:var(--danger);font-weight:700"' : ''}><td>${a.code} ${a.name}${a.is_active ? '' : '（停用）'}</td><td class="num">${a.has_balance ? a.closing : '—'}</td><td>${a.has_balance ? '⚠️ 有余额，余额不会进任何报表' : '无余额，暂不影响报表'}</td></tr>`).join('') + '</table>'
+    : '<div class="result">✅ 所有叶子科目均已映射到报表</div>';
+  const tplTables = ['bs', 'is'].map(rep => {
+    const rows = (r.rows[rep] || []).map(row => {
+      let codes;
+      if (TPL_EDIT && TPL_EDIT.rep === rep && TPL_EDIT.key === row.key) {
+        codes = tplEditorHtml();
+      } else {
+        codes = (row.codes || []).length
+          ? row.codes.map(c => `<span class="badge gray" style="margin-right:.3rem">${c.sign}${c.code} ${c.name || '<b style="color:var(--danger)">科目不存在</b>'}</span>`).join('')
+          : '<span style="color:var(--muted)">（计算行）</span>';
+      }
+      const editBtn = row.kind === 'line'
+        ? `<button class="small ghost" onclick="tplEdit('${rep}','${row.key}')">编辑</button>` : '';
+      return `<tr${row.kind === 'calc' ? ' class="rollup-row"' : ''}><td>${row.name}</td><td>${codes}</td><td style="width:60px">${editBtn}</td></tr>`;
+    }).join('');
+    return `<div style="display:flex;align-items:center;gap:.6rem;margin:.9rem 0 .3rem"><h4 style="margin:0">${repName[rep]}（行 → 科目）</h4>
+      <button class="small ghost" onclick="resetTpl('${rep}')">恢复默认模板</button></div>
+      <table><tr><th style="width:200px">报表项目</th><th>取数科目（符号+编码）</th><th>操作</th></tr>${rows}</table>`;
+  }).join('');
+  $('t_body').innerHTML = `
+    <div class="badge">${r.bs_identity_ok ? '✅' : '❌'} 资产总计 ${r.total_assets} ${r.bs_identity_ok ? '=' : '≠'} 负债和所有者权益总计 ${r.total_liabilities_and_equity}</div>
+    <div class="badge">${unmappedBal.length ? '⚠️' : '✅'} 未映射科目 ${unmapped.length} 个（其中 ${unmappedBal.length} 个有余额）</div>
+    ${dirty}
+    <h4 style="margin:.8rem 0 .3rem">未映射科目（科目 → 报表）</h4>${unmappedRows}
+    ${tplTables}
+    <div class="result" style="margin-top:.6rem">点「编辑」修改该报表行取哪些科目（+ 取借方/贷方正常方向，− 反向扣减）；未分配利润行默认并入全部损益科目（表结法，期中报表恒平衡）。「恢复默认模板」覆盖该报表全部映射；体检基于 ${PERIOD} 期末余额。</div>`;
+}
+
+function tplEditorHtml() {
+  const items = TPL_EDIT.items;
+  const chips = items.length
+    ? items.map((it, i) => `<span class="badge gray" style="margin-right:.3rem">${it.sign}${it.code} ${acctLabel(it.code) || '<b style="color:var(--danger)">科目不存在</b>'} <b style="cursor:pointer;color:var(--danger)" onclick="tplDelItem(${i})" title="移除">✕</b></span>`).join('')
+    : '<span style="color:var(--muted)">（空映射，该行恒为 0.00）</span>';
+  const opts = ACCOUNTS.map(a => `<option value="${a.code}">${a.code} ${a.name}${a.is_active ? '' : '（停用）'}</option>`).join('');
+  return `<div style="padding:.3rem 0">
+    <div style="margin-bottom:.35rem">${chips}</div>
+    <div style="display:flex;gap:.4rem;align-items:center">
+      <select id="tpl_sign" style="width:52px"><option value="+">＋</option><option value="-">－</option></select>
+      <select id="tpl_code" style="flex:1;min-width:180px">${opts}</select>
+      <button class="small" onclick="tplAddItem()">添加</button>
+      <button class="small" onclick="tplSave()">保存</button>
+      <button class="small ghost" onclick="tplCancel()">取消</button>
+    </div></div>`;
+}
+
+function tplEdit(rep, key) {
+  const row = (TPL_CACHE.rows[rep] || []).find(r => r.key === key);
+  if (!row) return;
+  TPL_EDIT = { rep, key, items: (row.codes || []).map(c => ({ code: c.code, sign: c.sign })) };
+  renderTpl();
+}
+function tplCancel() { TPL_EDIT = null; renderTpl(); }
+function tplDelItem(i) { TPL_EDIT.items.splice(i, 1); renderTpl(); }
+function tplAddItem() {
+  const code = $('tpl_code').value, sign = $('tpl_sign').value;
+  if (TPL_EDIT.items.some(it => it.code === code)) { alert('该科目已在映射中'); return; }
+  TPL_EDIT.items.push({ code, sign });
+  renderTpl();
+}
+async function tplSave() {
+  const { rep, key, items } = TPL_EDIT;
+  const formula = items.map(it => [it.code, it.sign === '+' ? 1 : -1]);
+  try {
+    await api(`/api/reports/template-row?book_id=${BOOK.id}&report=${rep}&key=${key}`, { method: 'PUT', body: JSON.stringify(formula) });
+    TPL_EDIT = null;
+    TPL_CACHE = await api(`/api/reports/template-check?book_id=${BOOK.id}&period=${PERIOD}`);
+    renderTpl();
+  } catch (e) { alert('保存失败：' + e.message); }
+}
+
+async function resetTpl(rep) {
+  const name = rep === 'bs' ? '资产负债表' : '利润表';
+  if (!confirm(`确定恢复${name}默认模板？当前账套该报表的全部取数公式将被覆盖，报表数字会随之变化。`)) return;
+  try {
+    const r = await api(`/api/reports/template-reset?book_id=${BOOK.id}&report=${rep}`, { method: 'POST' });
+    loadReport('tpl');
+  } catch (e) { alert('重置失败：' + e.message); }
 }
 
 /* ---------- 期初余额 ---------- */
@@ -764,12 +1279,74 @@ async function saveOpening() {
 }
 
 /* ---------- 发票 / 报税 ---------- */
+let INV_KIND = '';    // 发票方向筛选：'' 全部 / sales / purchase
+let INV_LIST = [];    // 当前列表缓存，供一键 AI 记账取数
+const INV_TYPE_CN = { special: '专票', general: '普票', digital: '数电' };
+const INV_STATUS_CN = { normal: '正常', red: '红冲', void: '作废' };
+
 async function renderInvoices() {
-  $('mainArea').innerHTML = `<h3 class="view-title">🧾 发票 <button class="ghost small" onclick="location.href='/docs'">去导入金税 Excel</button></h3><div id="t_body">加载中…</div>`;
-  const list = await api(`/api/invoices?book_id=${BOOK.id}`);
-  $('t_body').innerHTML = list.length ? `<table><tr><th>号码</th><th>日期</th><th>方向</th><th>类型</th><th class="num">价税合计</th><th>状态</th></tr>` +
-    list.map(i => `<tr><td>${i.invoice_no}</td><td>${i.invoice_date}</td><td>${i.kind === 'sales' ? '销项' : '进项'}</td><td>${i.invoice_type}</td><td class="num">${i.amount_total}</td><td>${i.status}</td></tr>`).join('') + '</table>'
-    : '<div class="result">暂无发票。可通过 /docs 的 POST /api/invoices/import 上传金税导出 Excel。</div>';
+  $('mainArea').innerHTML = `
+    <h3 class="view-title">🧾 发票</h3>
+    <div class="card">
+      <b>导入金税 Excel</b>
+      <div style="display:flex;gap:.5rem;margin-top:.4rem;align-items:center;flex-wrap:wrap">
+        <select id="inv_kind"><option value="sales">销项发票</option><option value="purchase">进项发票</option></select>
+        <input type="file" id="inv_file" accept=".xlsx,.xls">
+        <button onclick="importInvoices()">导入</button>
+        <span id="inv_msg" style="font-size:.8rem;color:var(--muted)"></span>
+      </div>
+      <div class="result" style="margin-top:.4rem">支持金税平台导出的销项/进项 Excel（表头需含「发票号码」），同号发票自动更新；单张发票 PDF/图片记账请用 AI 助手上传。</div>
+    </div>
+    <div style="margin-bottom:.5rem">
+      ${['', 'sales', 'purchase'].map(k => `<button class="small ${INV_KIND === k ? '' : 'ghost'}" style="margin-right:.35rem" onclick="INV_KIND='${k}';renderInvoices()">${k === '' ? '全部' : k === 'sales' ? '销项' : '进项'}</button>`).join('')}
+    </div>
+    <div id="inv_body">加载中…</div>`;
+  const q = INV_KIND ? `&kind=${INV_KIND}` : '';
+  INV_LIST = await api(`/api/invoices?book_id=${BOOK.id}${q}`);
+  $('inv_body').innerHTML = INV_LIST.length
+    ? `<table><tr><th>号码</th><th>日期</th><th>方向</th><th>类型</th><th>对方</th><th>品名</th><th class="num">价税合计</th><th>状态</th><th>记账</th></tr>` +
+      INV_LIST.map(i => `<tr>
+        <td>${i.invoice_no}</td><td>${i.invoice_date}</td>
+        <td>${i.kind === 'sales' ? '销项' : '进项'}</td>
+        <td>${INV_TYPE_CN[i.invoice_type] || i.invoice_type}</td>
+        <td>${i.kind === 'sales' ? i.buyer_name : i.seller_name}</td>
+        <td>${i.goods_name}</td>
+        <td class="num">${i.amount_total}</td>
+        <td>${INV_STATUS_CN[i.status] || i.status}</td>
+        <td>${i.voucher_id
+          ? `<a class="link" onclick="viewVoucher(${i.voucher_id})">${i.voucher_no_display}</a>`
+          : (i.status === 'normal' ? `<button class="small ghost" onclick="bookInvoice(${i.id})">AI记账</button>` : '—')}</td>
+      </tr>`).join('') + '</table>'
+    : '<div class="result">暂无发票，用上方入口导入金税 Excel。</div>';
+}
+
+async function importInvoices() {
+  const file = $('inv_file').files[0];
+  const msg = $('inv_msg');
+  if (!file) { msg.textContent = '请先选择文件'; return; }
+  msg.textContent = '导入中…';
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    const resp = await fetch(`/api/invoices/import?book_id=${BOOK.id}&kind=${$('inv_kind').value}`,
+      { method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN }, body: form });
+    if (!resp.ok) throw new Error(await errorText(resp));
+    const r = await resp.json();
+    msg.textContent = `✅ 新增 ${r.created} 张 · 更新 ${r.updated} 张 · 跳过 ${r.skipped} 张`;
+    $('inv_file').value = '';
+    renderInvoices();
+  } catch (e) { msg.textContent = '❌ ' + e.message; }
+}
+
+async function bookInvoice(id) {
+  const inv = INV_LIST.find(x => x.id === id);
+  if (!inv) return;
+  if (pendingAsk) { alert('AI 助手正在等你回复上一个问题，请先处理'); return; }
+  toggleChatPanel(true);
+  const dir = inv.kind === 'sales' ? '销项' : '进项';
+  const party = inv.kind === 'sales' ? `购买方「${inv.buyer_name}」` : `销售方「${inv.seller_name}」`;
+  $('chatInput').value = `请为这张${dir}发票记账：发票号 ${inv.invoice_no}，开票日期 ${inv.invoice_date}，${party}，品名「${inv.goods_name}」，价税合计 ${inv.amount_total} 元。`;
+  send();
 }
 
 async function renderTax() {
@@ -849,15 +1426,28 @@ async function loadReminders() {
 
 async function loadSummary() {
   try {
-    const is = await api(`/api/reports/income-statement?book_id=${BOOK.id}&period=${PERIOD}`);
-    const bs = await api(`/api/reports/balance-sheet?book_id=${BOOK.id}&period=${PERIOD}`);
-    const get = (rows, key) => (rows.find(r2 => r2.key === key) || {}).month || '0.00';
+    const s = await api(`/api/reports/period-summary?book_id=${BOOK.id}&period=${PERIOD}`);
+    const v = s.voucher_status;
+    const kv = (label, val) => `<div class="kv"><span>${label}</span><b>${val ?? '0.00'}</b></div>`;
+    const kvLink = (label, status, n) => `<div class="kv"><span>${label}</span><b class="chip-link" title="点击查看凭证" onclick="jumpVoucherStatus('${status}')">${n}</b></div>`;
     $('rp_summary').innerHTML = `
-      <div class="kv"><span>营业收入</span><b>${get(is.rows, 'operating_revenue')}</b></div>
-      <div class="kv"><span>净利润</span><b>${is.month_net_profit}</b></div>
-      <div class="kv"><span>资产总计</span><b>${bs.total_assets}</b></div>
-      <div class="kv"><span>未分配利润</span><b>${(bs.rows.find(r2 => r2.key === 'undistributed_profits') || {}).closing || '0.00'}</b></div>`;
+      <div class="sum-group">📄 凭证状态</div>
+      ${kvLink('草稿', 'draft', v.draft)}
+      ${kvLink('待审核', 'submitted', v.submitted)}
+      ${kvLink('已审核', 'audited', v.audited)}
+      ${kvLink('已过账', 'posted', v.posted)}
+      <div class="sum-group">📈 本期经营</div>
+      ${kv('营业收入', s.operating_revenue)}
+      ${kv('净利润', s.net_profit)}
+      <div class="sum-group">💰 资金与往来</div>
+      ${kv('货币资金', s.monetary_funds)}
+      ${kv('应收账款', s.accounts_receivable)}
+      ${kv('应付账款', s.accounts_payable)}`;
   } catch (e) { $('rp_summary').textContent = '加载失败'; }
+}
+function jumpVoucherStatus(status) {
+  V_STATUS = status; V_PERIOD = PERIOD; V_SEL.clear(); V_MSG = '';
+  switchView('vouchers');
 }
 
 document.querySelectorAll('#sideNav div').forEach(el => {

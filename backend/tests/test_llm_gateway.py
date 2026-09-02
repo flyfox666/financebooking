@@ -187,3 +187,62 @@ def test_test_provider_endpoint_reports_failure(client, admin_user, auth_headers
         gateway._http_post = original
     assert result["ok"] is False
     assert "401" in result["error"]
+
+
+def test_chat_with_tools_normalizes_flat_tool_calls(db_session, provider, monkeypatch):
+    """追问第二轮回传：内部扁平 tool_calls 必须转为 OpenAI 完整格式再发送（火山 400 回归）。"""
+    captured = {}
+
+    def fake_post(url, headers, payload, timeout):
+        captured.update({"payload": payload})
+        return {
+            "choices": [{"message": {"content": None, "tool_calls": []}}],
+            "usage": {},
+        }
+
+    monkeypatch.setattr(gateway, "_http_post", fake_post)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "收到设计费5000元"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "call-1", "name": "ask_user", "arguments": {"question": "日期是哪天？"}}
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call-1", "name": "ask_user", "content": "（已转达）"},
+    ]
+    gateway.chat_with_tools(db_session, messages=messages, tools=[{"name": "ask_user", "description": "x", "parameters": {}}])
+
+    sent_calls = captured["payload"]["messages"][2]["tool_calls"]
+    assert sent_calls[0]["id"] == "call-1"
+    assert sent_calls[0]["type"] == "function"
+    assert sent_calls[0]["function"]["name"] == "ask_user"
+    import json as _json
+
+    args = sent_calls[0]["function"]["arguments"]
+    assert isinstance(args, str) and _json.loads(args) == {"question": "日期是哪天？"}
+    # tool 消息原样保留
+    assert captured["payload"]["messages"][3]["tool_call_id"] == "call-1"
+
+
+def test_chat_with_tools_keeps_openai_format_calls(db_session, provider, monkeypatch):
+    """已是 OpenAI 完整格式的 tool_calls 不被二次转换。"""
+    captured = {}
+
+    def fake_post(url, headers, payload, timeout):
+        captured.update({"payload": payload})
+        return {"choices": [{"message": {"content": None, "tool_calls": []}}], "usage": {}}
+
+    monkeypatch.setattr(gateway, "_http_post", fake_post)
+    complete = {
+        "id": "call-9",
+        "type": "function",
+        "function": {"name": "ask_user", "arguments": '{"question":"几点？"}'},
+    }
+    messages = [
+        {"role": "assistant", "content": "", "tool_calls": [complete]},
+    ]
+    gateway.chat_with_tools(db_session, messages=messages, tools=[])
+    assert captured["payload"]["messages"][0]["tool_calls"][0] is complete

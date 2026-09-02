@@ -26,6 +26,8 @@ class InvoiceOut(BaseModel):
     tax_amount: Decimal
     amount_total: Decimal
     status: str
+    voucher_id: int | None = None
+    voucher_no_display: str | None = None
 
     @field_serializer("amount_excl", "tax_amount", "amount_total")
     def ser_amount(self, value: Decimal, _info) -> str:

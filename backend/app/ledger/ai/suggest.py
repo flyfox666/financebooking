@@ -193,9 +193,97 @@ def confirm_suggestion(
 
     doc.status = "confirmed"
     doc.voucher_id = voucher.id
+    _link_invoice(db, doc=doc, voucher_id=voucher.id)
     db.commit()
     db.refresh(voucher)
     return voucher
+
+
+def _link_invoice(db: Session, *, doc: AIDoc, voucher_id: int) -> None:
+    """AI 凭证落账后，按发票号回写发票台账的关联凭证（发票↔凭证打通）。
+
+    台账查不到该发票号时自动补录一条——让 PDF/图片路径的发票也沉淀进台账，
+    发票模块成为全量底册（与金税 Excel 批量导入殊途同归）。
+    """
+    try:
+        fields = json.loads(doc.fields_json or "{}")
+    except Exception:
+        return
+    invoice_no = str(fields.get("invoice_no") or "").strip()
+    if not invoice_no:
+        # 文本路径（如发票台账一键记账）没有结构化字段，从业务描述里兜底提取发票号
+        m = re.search(r"发票号[码]?\s*[：: ]?\s*(\d{20}|\d{8})", str(fields.get("note") or ""))
+        if m:
+            invoice_no = m.group(1)
+    if not invoice_no:
+        return
+    from app.models.tax import Invoice
+
+    invoice = db.scalar(
+        select(Invoice).where(Invoice.book_id == doc.book_id, Invoice.invoice_no == invoice_no)
+    )
+    if invoice is None and doc.source_kind not in ("text",):
+        # 只有真正解析过单据文件的（PDF/图片）才补录；纯文本描述的字段太少
+        invoice = _create_invoice_from_fields(db, doc=doc, fields=fields, invoice_no=invoice_no)
+    if invoice is not None and invoice.voucher_id is None:
+        invoice.voucher_id = voucher_id
+
+
+def _create_invoice_from_fields(db: Session, *, doc: AIDoc, fields: dict, invoice_no: str):
+    """按 AI 解析出的发票字段补录台账（缺的字段给安全默认值）。"""
+    from datetime import date as date_cls
+
+    from app.models.book import Book
+    from app.models.tax import Invoice
+
+    def dec(key: str) -> Decimal:
+        try:
+            return Decimal(str(fields.get(key) or "0").replace(",", "").replace("¥", "").replace("￥", ""))
+        except Exception:
+            return Decimal("0")
+
+    # 方向判断：购方是账套公司 → 我们开出去的（销项）；否则默认收到的（进项）
+    book = db.get(Book, doc.book_id)
+    buyer_name = str(fields.get("buyer_name") or "")
+    buyer_tax_no = str(fields.get("buyer_tax_no") or "")
+    is_sales = False
+    if book:
+        if buyer_tax_no and book.tax_no and buyer_tax_no == book.tax_no:
+            is_sales = True
+        elif buyer_name and book.name and (book.name in buyer_name or buyer_name in book.name):
+            is_sales = True
+    kind = "sales" if is_sales else "purchase"
+
+    # 开票日期：解析失败回退凭证日期今天，避免脏数据
+    date_str = str(fields.get("invoice_date") or "")
+    try:
+        invoice_date = date_cls.fromisoformat(date_str[:10])
+    except ValueError:
+        invoice_date = date_cls.today()
+
+    status = "red" if "红" in str(fields.get("status") or "") else "normal"
+    sign = Decimal("-1") if status == "red" else Decimal("1")
+
+    invoice = Invoice(
+        book_id=doc.book_id,
+        kind=kind,
+        invoice_type=str(fields.get("invoice_type") or "general")[:16],
+        invoice_no=invoice_no[:32],
+        invoice_date=invoice_date,
+        seller_name=str(fields.get("seller_name") or "")[:128],
+        seller_tax_no=str(fields.get("seller_tax_no") or "")[:32],
+        buyer_name=buyer_name[:128],
+        buyer_tax_no=buyer_tax_no[:32],
+        goods_name=str(fields.get("goods_name") or "")[:200],
+        amount_total=(dec("amount_total") * sign).quantize(TWO),
+        amount_excl=(dec("amount_excl") * sign).quantize(TWO),
+        tax_amount=(dec("tax_amount") * sign).quantize(TWO),
+        tax_rate=dec("tax_rate"),
+        status=status,
+    )
+    db.add(invoice)
+    db.flush()  # 拿到 id，供外层回写 voucher_id 后统一 commit
+    return invoice
 
 
 def discard_document(db: Session, doc_id: int) -> None:

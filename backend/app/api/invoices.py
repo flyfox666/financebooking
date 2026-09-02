@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -34,4 +35,17 @@ def list_invoices(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return invoice_service.list_invoices(db, book_id=book_id, kind=kind, period=period)
+    invoices = invoice_service.list_invoices(db, book_id=book_id, kind=kind, period=period)
+    voucher_ids = {inv.voucher_id for inv in invoices if inv.voucher_id}
+    vouchers = {}
+    if voucher_ids:
+        from app.models.voucher import Voucher
+
+        for v in db.scalars(select(Voucher).where(Voucher.id.in_(voucher_ids))):
+            vouchers[v.id] = v.voucher_no_display
+    out = []
+    for inv in invoices:
+        item = InvoiceOut.model_validate(inv)
+        item.voucher_no_display = vouchers.get(inv.voucher_id)
+        out.append(item)
+    return out

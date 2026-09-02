@@ -126,6 +126,7 @@ def _validate_lines(
                 "debit": debit,
                 "credit": credit,
                 "contact_id": int(contact_id) if contact_id else None,
+                "cf_item": None,
             }
         )
         total_debit += debit
@@ -134,7 +135,35 @@ def _validate_lines(
         raise VoucherError(f"借贷不平衡：借方合计 {total_debit}，贷方合计 {total_credit}")
     if total_debit == 0:
         raise VoucherError("凭证合计金额不能为零")
+    _apply_cf_items(raw_lines, prepared)
     return prepared, total_debit
+
+
+def _apply_cf_items(raw_lines, prepared: list[dict]) -> None:
+    """现金流量标注：现金类科目行合法 cf_item 保留并持久化；非现金行清除；
+    现金行缺标或值非法时按「对方最大行科目映射」自动兜底填充（报表永不缺数）。"""
+    from app.ledger.cashflow import CASH_ACCOUNTS, INFLOW_MAP, ITEM_LABELS, OUTFLOW_MAP
+
+    others = [
+        (row["account_code"], row["debit"] - row["credit"])
+        for row in prepared
+        if row["account_code"][:4] not in CASH_ACCOUNTS
+    ]
+    main_code = max(others, key=lambda x: abs(x[1]))[0] if others else ""
+
+    for raw, row in zip(raw_lines, prepared):
+        if row["account_code"][:4] not in CASH_ACCOUNTS:
+            continue
+        cf = str(raw.get("cf_item") or "").strip() if isinstance(raw, dict) else None
+        valid = cf in ITEM_LABELS if cf else False
+        if not valid:
+            # 兜底：按对方最大行科目映射，方向看本行现金增减
+            cash_amount = row["debit"] - row["credit"]
+            if cash_amount > 0:
+                cf = INFLOW_MAP.get(main_code, "other_in")
+            elif cash_amount < 0:
+                cf = OUTFLOW_MAP.get(main_code, "other_out")
+        row["cf_item"] = cf or None
 
 
 def create_voucher(

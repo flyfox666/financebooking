@@ -1,4 +1,5 @@
 import base64
+import json
 import mimetypes
 from pathlib import Path
 
@@ -181,6 +182,35 @@ def _chat_anthropic(
     return {"content": text, "usage": data.get("usage", {})}
 
 
+def _normalize_openai_messages(messages: list[dict]) -> list[dict]:
+    """把内部扁平 tool_calls 格式规范为 OpenAI 完整格式（火山要求）。
+
+    扁平格式（agent 循环内部使用）：{"id", "name", "arguments": dict}
+    OpenAI 格式：{"id", "type": "function", "function": {"name", "arguments": JSON字符串}}
+    """
+    out: list[dict] = []
+    for m in messages:
+        if m.get("role") == "assistant" and isinstance(m.get("tool_calls"), list):
+            calls = []
+            for c in m["tool_calls"]:
+                if isinstance(c, dict) and "function" not in c:
+                    args = c.get("arguments", {})
+                    calls.append({
+                        "id": c.get("id", ""),
+                        "type": "function",
+                        "function": {
+                            "name": c.get("name", ""),
+                            "arguments": args if isinstance(args, str) else json.dumps(args, ensure_ascii=False),
+                        },
+                    })
+                elif isinstance(c, dict):
+                    calls.append(c)
+            out.append({**m, "tool_calls": calls})
+        else:
+            out.append(m)
+    return out
+
+
 def chat_with_tools(
     db: Session,
     *,
@@ -215,7 +245,26 @@ def chat_with_tools(
             if block.get("type") == "tool_use"
         ]
         return {"content": content, "tool_calls": tool_calls, "usage": data.get("usage", {})}
-    payload = {"model": model, "messages": messages, "max_tokens": max_tokens, "tools": tools}
+    payload = {"model": model, "messages": _normalize_openai_messages(messages), "max_tokens": max_tokens}
+    # 已知默认开启「深度思考」的服务（火山 doubao-seed 等）：关掉换 5-7 倍速度。
+    # 记账场景有人工确认兜底（凭证卡片可编辑 + 制审分离），速度优先。
+    base = (provider.base_url or "").lower()
+    if "volces.com" in base:
+        payload["thinking"] = {"type": "disabled"}
+    elif "aliyuncs.com" in base or "dashscope" in base:
+        payload["enable_thinking"] = False
+    openai_tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": tool["name"],
+                "description": tool.get("description", ""),
+                "parameters": tool.get("parameters", {"type": "object", "properties": {}}),
+            },
+        }
+        for tool in tools
+    ]
+    payload["tools"] = openai_tools
     data = _http_post(
         _openai_url(provider.base_url),
         {"Authorization": f"Bearer {provider.api_key}"},

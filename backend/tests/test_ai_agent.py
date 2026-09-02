@@ -134,6 +134,35 @@ def test_chat_requires_doc_belongs_to_book(client, auth_headers, db_session, boo
     assert "已确认落账" in resp.json()["detail"]
 
 
+def test_search_contacts_and_mismatch_guard(db_session, book, contacts_pair):
+    """先查后建流程：search_contacts 模糊匹配；find_or_create_contact 类型不匹配时返回警示。"""
+    from app.ledger.ai.agent import execute_tool
+
+    # 模糊查询：关键字是档案名的一部分
+    hits = json.loads(execute_tool(db_session, book.id, "search_contacts", {"keyword": "测试客户"}))
+    assert any(c["contact_id"] == contacts_pair["customer"].id for c in hits)
+
+    # 反向包含：档案名是关键字的一部分（用户说了更长的名字）
+    hits = json.loads(execute_tool(db_session, book.id, "search_contacts", {"keyword": "上海测试客户有限公司"}))
+    assert any(c["contact_id"] == contacts_pair["customer"].id for c in hits)
+
+    # 类型过滤
+    hits = json.loads(execute_tool(db_session, book.id, "search_contacts", {"keyword": "测试", "ctype": "supplier"}))
+    assert all(c["ctype"] == "supplier" for c in hits) and hits
+
+    # 查不到
+    assert json.loads(execute_tool(db_session, book.id, "search_contacts", {"keyword": "不存在的单位"})) == []
+
+    # 同名但类型不一致 → 返回警示标记，不能静默用错
+    r = json.loads(execute_tool(db_session, book.id, "find_or_create_contact", {"name": "测试客户", "ctype": "supplier"}))
+    assert r["created"] is False and r["ctype_mismatch"] is True
+    assert "不一致" in r["note"]
+
+    # 同名同类型 → 正常复用
+    r = json.loads(execute_tool(db_session, book.id, "find_or_create_contact", {"name": "测试客户", "ctype": "customer"}))
+    assert r["created"] is False and r["contact_id"] == contacts_pair["customer"].id and "ctype_mismatch" not in r
+
+
 def test_seed_default_aux_still_on(db_session, book):
     account = aux_service.set_aux_types.__self__ if hasattr(aux_service.set_aux_types, "__self__") else None
     from sqlalchemy import select

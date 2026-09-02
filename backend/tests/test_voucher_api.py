@@ -205,3 +205,68 @@ def test_carryover_endpoint(
         "/api/vouchers", headers=auth_headers, params={"book_id": book.id, "status": "posted"}
     ).json()
     assert any(v["carryover_type"] == "pnl" and v["status"] == "posted" for v in nets_dto)
+
+
+def _create(client, headers, book_id, contacts_pair):
+    resp = client.post(
+        "/api/vouchers", params={"book_id": book_id}, headers=headers, json=income_payload(contacts_pair)
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
+def test_batch_submit_audit_post_flow(client, book, admin_user, mama_user, auditor_user, contacts_pair):
+    mama_h = _headers(client, "mama", "mama123456")
+    papa_h = _headers(client, "papa", "papa123456")
+
+    ids = [_create(client, mama_h, book.id, contacts_pair) for _ in range(3)]
+
+    # 记账员可批量提交
+    resp = client.post("/api/vouchers/batch", headers=mama_h, json={"ids": ids, "action": "submit"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["ok"] == ids and resp.json()["failed"] == []
+
+    # 记账员不可批量审核（403）
+    resp = client.post("/api/vouchers/batch", headers=mama_h, json={"ids": ids, "action": "audit"})
+    assert resp.status_code == 403
+
+    # 审核员批量审核 + 批量过账（创建人为 mama，无同人冲突）
+    resp = client.post("/api/vouchers/batch", headers=papa_h, json={"ids": ids, "action": "audit"})
+    assert resp.status_code == 200 and resp.json()["ok"] == ids
+    resp = client.post("/api/vouchers/batch", headers=papa_h, json={"ids": ids, "action": "post"})
+    assert resp.status_code == 200 and resp.json()["ok"] == ids
+
+    statuses = {v["id"]: v["status"] for v in client.get(
+        "/api/vouchers", headers=papa_h, params={"book_id": book.id, "status": "posted"}
+    ).json()}
+    assert all(statuses[i] == "posted" for i in ids)
+
+
+def test_batch_partial_failure_and_delete(client, book, admin_user, mama_user, auditor_user, contacts_pair):
+    mama_h = _headers(client, "mama", "mama123456")
+
+    ok_id = _create(client, mama_h, book.id, contacts_pair)
+    submitted_id = _create(client, mama_h, book.id, contacts_pair)
+    client.post(f"/api/vouchers/{submitted_id}/submit", headers=mama_h)
+
+    # 已提交的不能再提交 → 部分失败；不存在的 id 也进 failed
+    resp = client.post(
+        "/api/vouchers/batch", headers=mama_h,
+        json={"ids": [ok_id, submitted_id, 999999], "action": "submit"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] == [ok_id]
+    failed_ids = {f["id"] for f in data["failed"]}
+    assert submitted_id in failed_ids and 999999 in failed_ids
+    assert all(f["error"] for f in data["failed"])
+
+    # 批量删除：新草稿成功，非草稿失败
+    draft_id = _create(client, mama_h, book.id, contacts_pair)
+    resp = client.post(
+        "/api/vouchers/batch", headers=mama_h,
+        json={"ids": [draft_id, submitted_id], "action": "delete"},
+    )
+    data = resp.json()
+    assert data["ok"] == [draft_id]
+    assert {f["id"] for f in data["failed"]} == {submitted_id}

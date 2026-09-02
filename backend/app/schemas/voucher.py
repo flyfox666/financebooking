@@ -30,6 +30,11 @@ class VoucherUpdateIn(BaseModel):
     lines: list[VoucherLineIn] | None = None
 
 
+class VoucherBatchIn(BaseModel):
+    ids: list[int] = Field(min_length=1)
+    action: Literal["submit", "audit", "reject", "post", "unpost", "delete"]
+
+
 class VoucherLineOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -40,6 +45,7 @@ class VoucherLineOut(BaseModel):
     debit: Decimal
     credit: Decimal
     contact_id: int | None = None
+    cf_item: str | None = None
 
     @field_serializer("debit", "credit")
     def ser_amount(self, value: Decimal, _info) -> str:

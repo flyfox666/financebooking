@@ -78,26 +78,38 @@ def _flows(db: Session, book_id: int, period_from: str, period_to: str) -> dict:
         .order_by(Voucher.voucher_date, Voucher.voucher_no, VoucherLine.line_no)
     ).all()
 
-    grouped: dict[int, list[tuple[str, Decimal]]] = {}
+    grouped: dict[int, list[tuple[str, Decimal, str | None]]] = {}
     for voucher, line in rows:
         grouped.setdefault(voucher.id, []).append(
-            (line.account_code, Decimal(str(line.debit)) - Decimal(str(line.credit)))
+            (
+                line.account_code,
+                Decimal(str(line.debit)) - Decimal(str(line.credit)),
+                line.cf_item if line.cf_item in ITEM_LABELS else None,
+            )
         )
 
     buckets: dict[str, Decimal] = {}
     for lines in grouped.values():
-        cash_net = sum(
-            (amount for code, amount in lines if code[:4] in CASH_ACCOUNTS), ZERO
-        )
+        cash_lines = [(c, a, cf) for c, a, cf in lines if c[:4] in CASH_ACCOUNTS]
+        cash_net = sum((a for _, a, _ in cash_lines), ZERO)
         if cash_net == 0:
             continue
-        others = [(code, amount) for code, amount in lines if code[:4] not in CASH_ACCOUNTS]
-        if not others:
-            continue
-        main_code, main_amount = max(others, key=lambda item: abs(item[1]))
-        mapping = INFLOW_MAP if cash_net > 0 else OUTFLOW_MAP
-        item = mapping.get(main_code, "other_in" if cash_net > 0 else "other_out")
-        buckets[item] = buckets.get(item, ZERO) + cash_net
+        # 优先采用行级现金流量标注（支持一张凭证拆进多个流量项目）
+        tagged_total = ZERO
+        for _, amount, cf in cash_lines:
+            if cf and amount != 0:
+                buckets[cf] = buckets.get(cf, ZERO) + amount
+                tagged_total += amount
+        # 未标注的现金净额退回「对方最大行科目」推断
+        remainder = cash_net - tagged_total
+        if remainder != 0:
+            others = [(c, a) for c, a, _ in lines if c[:4] not in CASH_ACCOUNTS]
+            if not others:
+                continue
+            main_code, _ = max(others, key=lambda item: abs(item[1]))
+            mapping = INFLOW_MAP if remainder > 0 else OUTFLOW_MAP
+            item = mapping.get(main_code, "other_in" if remainder > 0 else "other_out")
+            buckets[item] = buckets.get(item, ZERO) + remainder
     return buckets
 
 

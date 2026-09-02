@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 690" width="720" height="690" font-family="SF Pro Text, PingFang SC, system-ui, Segoe UI, Roboto, sans-serif">
+  <rect x="0" y="0" width="720" height="690" fill="#ffffff"/>
+  <defs>
+    <marker id="mb" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M1 1 L7 4 L1 7 Z" fill="#4B3FE3"/></marker>
+    <marker id="mg" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M1 1 L7 4 L1 7 Z" fill="#94A3B8"/></marker>
+  </defs>
+
+  <!-- 泳道1 前端 -->
+  <text x="40" y="36" font-size="13" font-weight="600" fill="#171717">01 · 前端 / 浏览器 SPA</text>
+  <rect x="40" y="46" width="640" height="108" fill="none" stroke="#d9d9de" stroke-width="1.4" rx="12"/>
+  <rect x="56" y="72" width="172" height="58" rx="8" fill="#F2F7FF" stroke="#4B3FE3"/>
+  <text x="142" y="96" text-anchor="middle" font-size="12" font-weight="500" fill="#171717">主界面 app.html</text>
+  <text x="142" y="114" text-anchor="middle" font-size="11" fill="#52525B">科目·凭证·报表·税务·发票</text>
+  <rect x="240" y="72" width="188" height="58" rx="8" fill="#F7F7F8" stroke="#d9d9de"/>
+  <text x="334" y="96" text-anchor="middle" font-size="12" font-weight="500" fill="#171717">悬浮 AI 记账助手</text>
+  <text x="334" y="114" text-anchor="middle" font-size="11" fill="#52525B">缩放窗口 · 常驻工具栏</text>
+  <rect x="440" y="72" width="208" height="58" rx="8" fill="#F7F7F8" stroke="#d9d9de"/>
+  <text x="544" y="96" text-anchor="middle" font-size="12" font-weight="500" fill="#171717">登录 / 设置 index.html</text>
+  <text x="544" y="114" text-anchor="middle" font-size="11" fill="#52525B">账套 · LLM 服务配置</text>
+
+  <path d="M 162 130 C 160 156, 175 156, 180 198" fill="none" stroke="#4B3FE3" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#mb)"/>
+  <text x="176" y="170" text-anchor="middle" font-size="11" fill="#52525B">REST / JSON</text>
+
+  <!-- 泳道2 后端 -->
+  <text x="40" y="196" font-size="13" font-weight="600" fill="#171717">02 · 后端 FastAPI · 同一进程承载 Web / API / 静态资源（:8000）</text>
+  <rect x="40" y="206" width="640" height="356" fill="none" stroke="#d9d9de" stroke-width="1.4" rx="12"/>
+
+  <rect x="56" y="218" width="88" height="70" rx="8" fill="#EFEFF2" stroke="#d9d9de"/>
+  <text x="100" y="238" text-anchor="middle" font-size="12" font-weight="500" fill="#171717">接口·中间件</text>
+  <text x="100" y="254" text-anchor="middle" font-size="11" fill="#52525B">鉴权 / CORS / DI</text>
+  <path d="M 150 236 C 150 220, 173 220, 173 232" fill="none" stroke="#4B3FE3" stroke-width="1.7" stroke-linecap="round" marker-end="url(#mb)"/>
+  <rect x="158" y="222" width="176" height="34" rx="7" fill="#F7F7F8" stroke="#d9d9de"/>
+  <text x="246" y="243" text-anchor="middle" font-size="12" font-weight="500" fill="#171717">REST API · 13 路由模块</text>
+  <rect x="344" y="222" width="166" height="34" rx="7" fill="#F7F7F8" stroke="#d9d9de"/>
+  <text x="427" y="243" text-anchor="middle" font-size="12" font-weight="500" fill="#171717">JWT 鉴权 · deps</text>
+  <rect x="520" y="222" width="148" height="34" rx="7" fill="#F7F7F8" stroke="#d9d9de"/>
+  <text x="594" y="243" text-anchor="middle" font-size="12" font-weight="500" fill="#171717">CORS · 全局异常</text>
+
+  <rect x="56" y="296" width="88" height="70" rx="8" fill="#EFEFF2" stroke="#d9d9de"/>
+  <text x="100" y="316" text-anchor="middle" font-size="12" font-weight="500" fill="#171717">业务领域层</text>
+  <text x="100" y="332" text-anchor="middle" font-size="11" fill="#52525B">账务 / 税务 / AI</text>
+  <rect x="158" y="300" width="244" height="62" rx="8" fill="#F2F7FF" stroke="#4B3FE3"/>
+  <text x="280" y="320" text-anchor="middle" font-size="12" font-weight="500" fill="#171717">核心账务 ledger</text>
+  <text x="280" y="338" text-anchor="middle" font-size="11" fill="#52525B">凭证·科目·账套·期末结转</text>
+  <text x="280" y="351" text-anchor="middle" font-size="11" fill="#52525B">余额·现金流·报表·导出</text>
+  <rect x="412" y="300" width="122" height="62" rx="8" fill="#F7F7F8" stroke="#d9d9de"/>
+  <text x="473" y="320" text-anchor="middle" font-size="12" font-weight="500" fill="#171717">税务模块</text>
+  <text x="473" y="336" text-anchor="middle" font-size="11" fill="#52525B">增值税</text>
+  <text x="473" y="349" text-anchor="middle" font-size="11" fill="#52525B">企税·个税·印花</text>
+  <rect x="544" y="300" width="112" height="62" rx="8" fill="#F2F7FF" stroke="#4B3FE3"/>
+  <text x="600" y="318" text-anchor="middle" font-size="12" font-weight="500" fill="#171717">AI 记账</text>
+  <text x="600" y="333" text-anchor="middle" font-size="11" fill="#52525B">智能体 agent</text>
+  <text x="600" y="346" text-anchor="middle" font-size="11" fill="#52525B">parse / suggest</text>
+
+  <rect x="56" y="374" width="88" height="70" rx="8" fill="#EFEFF2" stroke="#d9d9de"/>
+  <text x="100" y="394" text-anchor="middle" font-size="12" font-weight="500" fill="#171717">数据·模型层</text>
+  <text x="100" y="410" text-anchor="middle" font-size="11" fill="#52525B">ORM / 校验</text>
+  <rect x="158" y="374" width="508" height="34" rx="7" fill="#F7F7F8" stroke="#d9d9de"/>
+  <text x="412" y="395" text-anchor="middle" font-size="12" font-weight="500" fill="#171717">SQLAlchemy ORM · Pydantic schemas · Session 管理（鉴权/账套/凭证/税务/发票）</text>
+
+  <rect x="56" y="452" width="88" height="70" rx="8" fill="#EFEFF2" stroke="#d9d9de"/>
+  <text x="100" y="472" text-anchor="middle" font-size="12" font-weight="500" fill="#171717">基础设施层</text>
+  <text x="100" y="488" text-anchor="middle" font-size="11" fill="#52525B">配置/迁移/备份</text>
+  <rect x="158" y="452" width="508" height="34" rx="7" fill="#F7F7F8" stroke="#d9d9de"/>
+  <text x="412" y="473" text-anchor="middle" font-size="12" font-weight="500" fill="#171717">config · alembic 迁移 · security(密码/JWT) · 每日 3 点自动备份</text>
+
+  <path d="M 244 300 L 244 256" fill="none" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" marker-end="url(#mg)"/>
+  <path d="M 412 374 L 412 342" fill="none" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" marker-end="url(#mg)"/>
+  <path d="M 412 452 L 412 408" fill="none" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" marker-end="url(#mg)"/>
+
+  <!-- 泳道3 数据与外部 -->
+  <text x="40" y="592" font-size="13" font-weight="600" fill="#171717">03 · 数据存储与外部服务</text>
+  <rect x="40" y="600" width="640" height="76" fill="none" stroke="#d9d9de" stroke-width="1.4" rx="12"/>
+  <rect x="56" y="614" width="180" height="48" rx="8" fill="#F7F7F8" stroke="#d9d9de"/>
+  <text x="146" y="634" text-anchor="middle" font-size="12" font-weight="500" fill="#171717">SQLite</text>
+  <text x="146" y="650" text-anchor="middle" font-size="11" fill="#52525B">/data/ledger.db</text>
+  <rect x="252" y="614" width="176" height="48" rx="8" fill="#F7F7F8" stroke="#d9d9de"/>
+  <text x="340" y="634" text-anchor="middle" font-size="12" font-weight="500" fill="#171717">文件系统</text>
+  <text x="340" y="650" text-anchor="middle" font-size="11" fill="#52525B">附件 · 每日备份</text>
+  <rect x="444" y="614" width="194" height="48" rx="8" fill="#F7F7F8" stroke="#d9d9de"/>
+  <text x="541" y="634" text-anchor="middle" font-size="12" font-weight="500" fill="#171717">外部 LLM Provider</text>
+  <text x="541" y="650" text-anchor="middle" font-size="11" fill="#52525B">Anthropic 等 / 可配置</text>
+
+  <path d="M 180 486 C 180 530, 150 550, 152 610" fill="none" stroke="#4B3FE3" stroke-width="1.7" stroke-linecap="round" marker-end="url(#mb)"/>
+  <path d="M 350 486 C 350 540, 342 552, 341 610" fill="none" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" marker-end="url(#mg)"/>
+  <path d="M 600 362 C 604 470, 545 540, 542 610" fill="none" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" marker-end="url(#mg)"/>
+</svg>

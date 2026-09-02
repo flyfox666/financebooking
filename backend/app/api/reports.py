@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -67,6 +67,58 @@ def get_income_statement(
     book_id: int, period: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
 ):
     return report_service.income_statement(db, book_id=book_id, period=period)
+
+
+@router.get("/period-summary")
+def get_period_summary(
+    book_id: int, period: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+):
+    return report_service.period_summary(db, book_id=book_id, period=period)
+
+
+@router.get("/template-check")
+def get_template_check(
+    book_id: int, period: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+):
+    """映射体检：报表行→科目映射全景、未映射科目、脏引用、恒等式校验。"""
+    return report_service.template_check(db, book_id=book_id, period=period)
+
+
+@router.put("/template-row")
+def update_template_row(
+    book_id: int,
+    report: str,
+    key: str,
+    formula: list = Body(..., embed=False),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """编辑指定报表行的取数科目映射（formula 为 [[科目编码, ±1], ...]）。"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可编辑报表模板")
+    try:
+        return report_service.update_template_row(
+            db, book_id=book_id, report=report, key=key, formula=formula
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/template-reset")
+def reset_template(
+    book_id: int,
+    report: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """恢复指定报表的默认取数模板（覆盖当前账套该报表全部公式）。"""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可重置报表模板")
+    try:
+        rows = report_service.reset_template(db, book_id=book_id, report=report)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "report": report, "rows": rows}
 
 
 @router.get("/cash-flow")
