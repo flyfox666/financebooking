@@ -2,3 +2,4 @@
 -r requirements.txt
 pytest>=8.0
 fpdf2>=2.7
+qrcode>=7.4
