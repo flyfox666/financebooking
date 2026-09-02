@@ -1,0 +1,4 @@
+# 开发/测试专用依赖（生产镜像不装）
+-r requirements.txt
+pytest>=8.0
+fpdf2>=2.7

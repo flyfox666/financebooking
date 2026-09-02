@@ -20,9 +20,7 @@ jobs:
           cache: pip
 
       - name: Install python deps
-        run: |
-          pip install -r backend/requirements.txt
-          pip install pytest
+        run: pip install -r backend/requirements-dev.txt
 
       - name: Run tests
         working-directory: backend
