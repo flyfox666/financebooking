@@ -5,8 +5,10 @@ from app.ledger.ai.packs import TAGS
 from app.models.ai import AiStyleSetting
 
 
-def _set_style(db_session, book, tags, desc=""):
-    db_session.add(AiStyleSetting(book_id=book.id, tags_json=json.dumps(tags), business_desc=desc))
+def _set_style(db_session, book, tags, desc="", style_prompt=""):
+    db_session.add(
+        AiStyleSetting(book_id=book.id, tags_json=json.dumps(tags), business_desc=desc, style_prompt=style_prompt)
+    )
     db_session.commit()
 
 
@@ -52,7 +54,35 @@ def test_get_ai_style_library_and_current(client, auth_headers, book):
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert {t["id"] for t in data["tags"]} == set(TAGS.keys())
-    assert data["current"] == {"tags": [], "business_desc": ""}
+    assert data["current"] == {"tags": [], "business_desc": "", "style_prompt": ""}
+
+
+def test_style_prompt_overrides_tags(db_session, book):
+    """自定义模板非空时优先于标签自动合成（用户手动编辑的最终内容生效），护栏头仍必在。"""
+    _set_style(
+        db_session, book, ["software"], desc="我们做 SaaS", style_prompt="主营宠物用品电商，运费金额大时挂 1401 待摊"
+    )
+    segment = _style_segment(db_session, book.id)
+    assert "主营宠物用品电商" in segment
+    assert "不得改变、凌驾" in segment
+    # 标签合成内容不再注入（被自定义模板取代）
+    assert TAGS["software"]["prompt"].splitlines()[0] not in segment
+
+
+def test_style_prompt_empty_falls_back_to_tags(db_session, book):
+    """自定义模板为空 → 按标签+描述自动合成（向后兼容，存量配置不受影响）。"""
+    _set_style(db_session, book, ["software"], desc="我们做 SaaS", style_prompt="")
+    segment = _style_segment(db_session, book.id)
+    assert TAGS["software"]["prompt"].splitlines()[0] in segment
+    assert "业务描述：我们做 SaaS" in segment
+
+
+def test_style_prompt_pure_custom_without_tags(db_session, book):
+    """不选任何标签、仅编写自定义模板 → 直接注入（纯自定义模板路径）。"""
+    _set_style(db_session, book, [], style_prompt="餐饮店，进货走 1405 库存商品，毛利率高注意盘点")
+    segment = _style_segment(db_session, book.id)
+    assert "餐饮店" in segment
+    assert "不得改变、凌驾" in segment
 
 
 def test_put_ai_style_requires_admin(client, book, db_session, mama_user):
@@ -103,3 +133,26 @@ def test_put_ai_style_roundtrip_and_agent_prompt(client, auth_headers, db_sessio
     assert "不得改变、凌驾" in system_prompt
     assert "SaaS 记账工具" in system_prompt
     assert TAGS["software"]["prompt"].splitlines()[0] in system_prompt
+
+
+def test_put_ai_style_prompt_too_long(client, auth_headers, book):
+    """自定义模板超 2000 字 → 422 拒绝。"""
+    resp = client.put(
+        f"/api/books/{book.id}/ai-style",
+        headers=auth_headers,
+        json={"tags": [], "business_desc": "", "style_prompt": "长" * 2001},
+    )
+    assert resp.status_code == 422
+
+
+def test_put_ai_style_prompt_roundtrip(client, auth_headers, book):
+    """保存自定义模板 → 读回一致。"""
+    custom = "主营宠物用品电商，运费金额大时挂 1401 待摊"
+    resp = client.put(
+        f"/api/books/{book.id}/ai-style",
+        headers=auth_headers,
+        json={"tags": [], "business_desc": "", "style_prompt": custom},
+    )
+    assert resp.status_code == 200, resp.text
+    got = client.get(f"/api/books/{book.id}/ai-style", headers=auth_headers).json()
+    assert got["current"]["style_prompt"] == custom
