@@ -37,12 +37,18 @@ FIELD_KEYS = [
     "seller_name", "seller_tax_no", "buyer_name", "buyer_tax_no",
     "goods_name", "amount_excl", "tax_rate", "tax_amount", "amount_total", "status",
 ]
+PAYMENT_KEYS = ["channel", "pay_direction", "counterparty", "amount_total", "pay_time", "note"]
 VLM_PROMPT = (
-    "你是发票识别引擎。从图片中提取发票字段，只输出一个 JSON 对象："
-    '{"invoice_type":"special|general","invoice_no":"","invoice_code":"","invoice_date":"YYYY-MM-DD",'
-    '"seller_name":"","seller_tax_no":"","buyer_name":"","buyer_tax_no":"","goods_name":"",'
-    '"amount_excl":"0.00","tax_rate":"0.01","tax_amount":"0.00","amount_total":"0.00","status":"normal|red"}。'
-    "金额为两位小数的字符串；数电票发票号码为20位数字；缺失字段填空字符串。"
+    "你是票据识别引擎。识别图片中的每张票据（可能不止一张：一张照片里可能有两张发票，"
+    "或一张发票加一个支付记录）。输出一个 JSON 数组，每个元素对应一张票据："
+    '发票类：{"kind":"invoice","fields":{"invoice_type":"special|general|digital","invoice_no":"",'
+    '"invoice_code":"","invoice_date":"YYYY-MM-DD","seller_name":"","seller_tax_no":"","buyer_name":"",'
+    '"buyer_tax_no":"","goods_name":"","amount_excl":"0.00","tax_rate":"0.01","tax_amount":"0.00",'
+    '"amount_total":"0.00","status":"normal|red"}}；'
+    '支付截图类（微信/支付宝/银行支付记录）：{"kind":"payment","fields":{"channel":"微信|支付宝|银行",'
+    '"pay_direction":"pay|receive","counterparty":"对方名称","amount_total":"0.00",'
+    '"pay_time":"YYYY-MM-DD HH:MM","note":"事项备注"}}。'
+    "金额为两位小数的字符串；数电票发票号码为20位数字；缺失字段填空字符串；只输出 JSON 数组。"
 )
 
 
@@ -108,7 +114,7 @@ def parse_invoice_qr_payload(payload: str) -> dict:
         if not amount_taken:
             value = _dec(part)
             if value is not None and Decimal("0") < value < Decimal("10000000") and "." in part:
-                fields["amount_total"] = format(value, "f")
+                fields["amount_total"] = format(value.quantize(TWO), "f")
                 amount_taken = True
     fields["status"] = "normal"
     return fields
@@ -179,7 +185,7 @@ def parse_xml_fields(content: bytes) -> dict:
             fields[field_key] = _norm_date(value) or value
         elif field_key in ("amount_total", "tax_amount", "amount_excl"):
             number = _dec(value)
-            fields[field_key] = format(number, "f") if number is not None else value
+            fields[field_key] = format(number.quantize(TWO), "f") if number is not None else value
         else:
             fields[field_key] = value
     if fields["invoice_no"]:
@@ -238,7 +244,7 @@ def parse_pdf_text_fields(text: str) -> dict:
     if m:
         value = _dec(m.group(1))
         if value is not None:
-            fields["amount_total"] = format(value, "f")
+            fields["amount_total"] = format(value.quantize(TWO), "f")
 
     names = re.findall(r"名\s*称\s*[：:]\s*([^\n\r]{2,60}?)\s*(?:统一社会信用代码|纳税人识别号|$)", text)
     if names:
@@ -281,7 +287,28 @@ def _to_data_url(content: bytes, mime: str) -> str:
     return f"data:{mime};base64," + base64.b64encode(content).decode()
 
 
-def vlm_fields(db, image_bytes: bytes, mime: str) -> dict:
+def _norm_fields(raw: dict, keys: list[str], *, is_invoice: bool) -> dict:
+    fields = {key: "" for key in keys}
+    for key in keys:
+        value = str(raw.get(key, "") or "").strip()
+        if not value:
+            continue
+        if key in ("amount_total", "tax_amount", "amount_excl"):
+            number = _dec(value)
+            # 强制两位小数：模型可能输出 "320"（无小数位），统一成 "320.00"
+            fields[key] = format(number.quantize(TWO), "f") if number is not None else value
+        elif is_invoice and key == "invoice_date":
+            fields[key] = _norm_date(value) or value
+        else:
+            fields[key] = value
+    return fields
+
+
+def vlm_documents(db, image_bytes: bytes, mime: str) -> list[dict]:
+    """视觉模型识别图片中的全部票据，返回 [{"kind": "invoice"|"payment", "fields": {...}}]。
+
+    图片里可能有多张票据（多票同图/发票+支付截图），因此输出恒为数组语义。
+    """
     result = gateway.chat_vision(
         db,
         text=VLM_PROMPT,
@@ -292,19 +319,24 @@ def vlm_fields(db, image_bytes: bytes, mime: str) -> dict:
         data = json.loads(result["content"])
     except json.JSONDecodeError:
         raise LLMError("视觉模型输出不是合法 JSON：" + result["content"][:200])
-    fields = blank_fields()
-    for key in FIELD_KEYS:
-        value = str(data.get(key, "") or "").strip()
-        if not value:
+    if isinstance(data, dict):  # 模型偶尔忽略数组约定只回一个对象
+        data = [data]
+    if not isinstance(data, list):
+        return []
+    documents: list[dict] = []
+    for item in data:
+        if not isinstance(item, dict):
             continue
-        if key == "invoice_date":
-            fields[key] = _norm_date(value) or value
-        elif key in ("amount_total", "tax_amount", "amount_excl"):
-            number = _dec(value)
-            fields[key] = format(number, "f") if number is not None else value
-        else:
-            fields[key] = value
-    return fields
+        kind = "payment" if item.get("kind") == "payment" else "invoice"
+        keys = FIELD_KEYS if kind == "invoice" else PAYMENT_KEYS
+        documents.append({"kind": kind, "fields": _norm_fields(item.get("fields") or {}, keys, is_invoice=kind == "invoice")})
+    return documents
+
+
+def vlm_fields(db, image_bytes: bytes, mime: str) -> dict:
+    """PDF 补全路径用的发票字段提取：取视觉结果中的第一张发票（无发票返回空字段）。"""
+    invoices = [d["fields"] for d in vlm_documents(db, image_bytes, mime) if d["kind"] == "invoice"]
+    return invoices[0] if invoices else blank_fields()
 
 
 def merge_fields(*layers: tuple[str, dict]) -> tuple[dict, list[str], list[str]]:
@@ -343,6 +375,7 @@ def route_and_parse(
     layers: list[tuple[str, dict]] = []
     doc_type = "invoice"
     source_kind = ""
+    extra_docs: list[dict] = []
 
     if suffix == ".xml" or (not suffix and content.lstrip()[:5] == b"<?xml"):
         source_kind = "xml"
@@ -366,10 +399,28 @@ def route_and_parse(
     elif suffix in IMAGE_EXTS:
         source_kind = "image"
         qr = decode_qr_fields(content)
+        documents = vlm_documents(db, content, IMAGE_MIME.get(suffix, "image/jpeg")) if allow_vlm else []
+        invoices = [d["fields"] for d in documents if d["kind"] == "invoice"]
+        payments = [d["fields"] for d in documents if d["kind"] == "payment"]
+        if payments and not invoices and not any(value for value in qr.values()):
+            # 支付截图（微信/支付宝/银行记录）：图里没有发票候选时按支付单据处理
+            payment_warnings: list[str] = []
+            if not payments[0].get("amount_total"):
+                payment_warnings.append("支付金额未能识别，请人工确认后入账")
+            return {
+                "doc_type": "payment",
+                "source_kind": source_kind,
+                "fields": payments[0],
+                "warnings": payment_warnings,
+                "layers": ["vlm"],
+                "extra_docs": [{"doc_type": "payment", "fields": f} for f in payments[1:]],
+            }
         if any(value for value in qr.values()):
             layers.append(("qr", qr))
-        if allow_vlm:
-            layers.append(("vlm", vlm_fields(db, content, IMAGE_MIME.get(suffix, "image/jpeg"))))
+        if invoices:
+            layers.append(("vlm", invoices[0]))
+            extra_docs.extend({"doc_type": "invoice", "fields": f} for f in invoices[1:])
+        extra_docs.extend({"doc_type": "payment", "fields": f} for f in payments)
     else:
         text = content.decode("utf-8", "ignore").strip()
         if note := text:
@@ -379,6 +430,7 @@ def route_and_parse(
                 "fields": {"note": note},
                 "warnings": [],
                 "layers": ["text"],
+                "extra_docs": [],
             }
         raise VoucherError("无法识别的文件类型")
 
@@ -405,4 +457,5 @@ def route_and_parse(
         "fields": fields,
         "warnings": warnings,
         "layers": used or [layer_name for layer_name, _ in layers],
+        "extra_docs": extra_docs,
     }

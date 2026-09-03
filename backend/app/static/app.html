@@ -466,6 +466,12 @@ async function send() {
     }
     CHAT_HISTORY.push({ role: 'user', content: text || `[文件] ${file.name}` });
     await agentChat(doc.doc_id);
+    const extras = doc.extra_doc_ids || [];
+    for (let i = 0; i < extras.length; i++) {
+      if (pendingAsk) { addBubble(`⏸ 检测到还有 ${extras.length - i} 张票据待处理：先回答上面的问题；处理完后可重新上传或逐张描述`); break; }
+      addBubble(`📄 继续处理下一张票据（${i + 2}/${extras.length + 1}）…`);
+      await agentChat(extras[i]);
+    }
   } catch (e) { addBubble(`❌ ${e.message}`); }
 }
 

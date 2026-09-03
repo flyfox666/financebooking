@@ -96,7 +96,25 @@ async def parse_document(
         db.add(doc)
         db.commit()
         db.refresh(doc)
-        return {"doc_id": doc.id, **result}
+        # 多票据同图：其余候选各建一条解析记录，前端逐张走 agent 流程
+        extra_doc_ids: list[int] = []
+        for candidate in result.get("extra_docs") or []:
+            extra = AIDoc(
+                book_id=book_id,
+                doc_type=candidate["doc_type"],
+                source_kind=result["source_kind"],
+                file_name=filename[:200],
+                staging_path=staging_path,
+                fields_json=json.dumps(candidate["fields"], ensure_ascii=False),
+                warnings_json=json.dumps(result["warnings"], ensure_ascii=False),
+                layers_json=json.dumps(result["layers"], ensure_ascii=False),
+                status="parsed",
+            )
+            db.add(extra)
+            db.commit()
+            db.refresh(extra)
+            extra_doc_ids.append(extra.id)
+        return {"doc_id": doc.id, "extra_doc_ids": extra_doc_ids, **result}
 
     doc = AIDoc(
         book_id=book_id,
