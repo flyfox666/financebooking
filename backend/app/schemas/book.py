@@ -30,3 +30,4 @@ class BookOut(BaseModel):
 class AiStyleIn(BaseModel):
     tags: list[str] = []
     business_desc: str = Field(default="", max_length=1000)
+    style_prompt: str = Field(default="", max_length=2000)

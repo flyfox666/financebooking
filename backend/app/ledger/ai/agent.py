@@ -471,14 +471,20 @@ def _tax_rule(book: Book | None) -> str:
 
 
 def _style_segment(db: Session, book_id: int) -> str:
-    """账套级行业标签 + 业务描述 → 提示词风格段（包在护栏文本内）。
+    """账套级行业标签 + 业务描述 + 自定义模板 → 提示词风格段（包在护栏文本内）。
 
-    未配置（无记录，或标签与描述全空）返回空串——行为与历史版本完全一致。
+    优先级：style_prompt（用户在「自定义模板」编辑器里最终保存的内容）非空 → 直接用；
+    否则按 tags + business_desc 自动合成（历史逻辑，向后兼容）。
+    未配置（无记录，或全部为空）返回空串——行为与历史版本完全一致。
     非法标签静默丢弃（标签库随代码演进，存量配置可能引用已下线标签）。
     """
     setting = db.scalar(select(AiStyleSetting).where(AiStyleSetting.book_id == book_id))
     if setting is None:
         return ""
+    # 自定义模板优先（用户手动编辑过的最终注入内容）
+    custom = (setting.style_prompt or "").strip()
+    if custom:
+        return "\n\n" + STYLE_GUARD_HEAD + "\n" + custom
     try:
         raw_tags = json.loads(setting.tags_json or "[]")
     except (json.JSONDecodeError, TypeError):

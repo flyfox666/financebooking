@@ -97,7 +97,7 @@ def get_ai_style(
         raise HTTPException(status_code=404, detail="账套不存在")
     setting = db.scalar(select(AiStyleSetting).where(AiStyleSetting.book_id == book_id))
     if setting is None:
-        current = {"tags": [], "business_desc": ""}
+        current = {"tags": [], "business_desc": "", "style_prompt": ""}
     else:
         import json as _json
 
@@ -105,7 +105,11 @@ def get_ai_style(
             tags = [t for t in _json.loads(setting.tags_json or "[]") if t in TAGS]
         except (_json.JSONDecodeError, TypeError):
             tags = []
-        current = {"tags": tags, "business_desc": setting.business_desc or ""}
+        current = {
+            "tags": tags,
+            "business_desc": setting.business_desc or "",
+            "style_prompt": setting.style_prompt or "",
+        }
     return {
         "tags": [
             {"id": key, "name": value["name"], "desc": value["desc"], "prompt": value["prompt"]}
@@ -135,8 +139,9 @@ def put_ai_style(
         db.add(setting)
     setting.tags_json = _json.dumps(body.tags, ensure_ascii=False)
     setting.business_desc = body.business_desc.strip()
+    setting.style_prompt = body.style_prompt.strip()
     db.commit()
-    return {"tags": body.tags, "business_desc": setting.business_desc}
+    return {"tags": body.tags, "business_desc": setting.business_desc, "style_prompt": setting.style_prompt}
 
 
 @router.get("/accounts", response_model=list[AccountNode])

@@ -25,7 +25,8 @@ class AIDoc(Base):
 
 
 class AiStyleSetting(Base):
-    """账套级 AI 记账偏好：行业标签（多选）+ 业务描述（限长）。一账套一条。"""
+    """账套级 AI 记账偏好：行业标签（多选）+ 业务描述（限长）+ 自定义模板（style_prompt，
+    用户最终编辑的注入内容，非空时优先于标签自动合成）。一账套一条。"""
 
     __tablename__ = "ai_style_setting"
 
@@ -33,4 +34,5 @@ class AiStyleSetting(Base):
     book_id: Mapped[int] = mapped_column(ForeignKey("book.id"), unique=True, index=True)
     tags_json: Mapped[str] = mapped_column(Text, default="[]")
     business_desc: Mapped[str] = mapped_column(Text, default="")
+    style_prompt: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

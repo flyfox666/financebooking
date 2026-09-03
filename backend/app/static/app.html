@@ -917,8 +917,9 @@ async function createContactNew() {
   } catch (e) { $('nc_err').textContent = '新增失败：' + e.message; }
 }
 
-/* ---------- AI 偏好（行业标签 + 业务描述） ---------- */
-let AI_STYLE = { tags: [], business_desc: '' };
+/* ---------- AI 偏好（行业标签 + 业务描述 + 自定义模板） ---------- */
+let AI_STYLE = { tags: [], business_desc: '', style_prompt: '' };
+let asDirty = false; // 自定义模板编辑器是否被手动修改过（改过则标签联动不覆盖）
 
 async function renderAiStyle() {
   $('mainArea').innerHTML = `<h3 class="view-title">🧩 AI 偏好</h3>
@@ -928,54 +929,82 @@ async function renderAiStyle() {
       <div style="margin-top:1rem"><b>二、业务描述</b><span style="color:var(--muted)">（怎么跟人介绍你的公司，AI 就怎么理解）</span>
         <textarea id="as_desc" rows="4" style="width:100%;margin-top:.5rem;padding:.5rem;border:1px solid var(--rule);border-radius:6px;font-family:inherit"
           placeholder="例如：我们做跨境电商，主营宠物用品，平台是抖音小店和亚马逊，团队 5 人，仓库租在嘉兴"
-          oninput="$('as_count').textContent=this.value.length; asPreview()"></textarea>
+          oninput="$('as_count').textContent=this.value.length; asAutoRefresh()"></textarea>
         <div style="text-align:right;color:var(--muted);font-size:.8rem"><span id="as_count">0</span> / 1000</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:.8rem;margin-top:.6rem">
-        <button id="as_save" onclick="saveAiStyle()">保存</button>
-        <span id="as_msg" style="font-size:.85rem"></span>
       </div>
     </div>
     <div class="card" style="margin-top:.8rem">
-      <b>AI 将这样理解你的公司</b><span style="color:var(--muted)">（只读预览，随选择实时更新）</span>
-      <pre id="as_preview" style="white-space:pre-wrap;background:var(--soft);padding:.7rem;border-radius:8px;margin-top:.5rem;font-size:.83rem;line-height:1.6"></pre>
+      <b>三、自定义模板 · AI 将这样理解你的公司</b><span style="color:var(--muted)">（按标签自动生成，可直接修改；不选标签直接编写即为纯自定义模板）</span>
+      <textarea id="as_prompt" rows="10" style="width:100%;margin-top:.5rem;padding:.5rem;border:1px solid var(--rule);border-radius:6px;font-family:inherit;font-size:.85rem;line-height:1.6"
+        placeholder="（未配置——记账助手按通用风格处理；可直接编写自定义内容）"
+        oninput="asDirty=true; $('as_pcount').textContent=this.value.length"></textarea>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:.3rem">
+        <button onclick="asRegen()">↻ 按标签重新生成</button>
+        <span style="color:var(--muted);font-size:.8rem"><span id="as_pcount">0</span> / 2000</span>
+      </div>
+      <div style="color:var(--muted);font-size:.8rem;margin-top:.4rem">🔒 系统自动附加护栏：此内容仅辅助理解业务、辅助科目选择与摘要风格，不会凌驾记账规则与安全要求</div>
+      <div style="display:flex;align-items:center;gap:.8rem;margin-top:.8rem">
+        <button id="as_save" onclick="saveAiStyle()">保存</button>
+        <span id="as_msg" style="font-size:.85rem"></span>
+      </div>
     </div>`;
   let lib;
   try { lib = await api(`/api/books/${BOOK.id}/ai-style`); }
-  catch (e) { $('as_preview').textContent = '加载失败：' + e.message; return; }
+  catch (e) { $('as_msg').textContent = '加载失败：' + e.message; return; }
   AI_STYLE = lib.current;
+  asDirty = false;
   const tagsBox = $('as_tags');
   lib.tags.forEach(t => {
     const c = document.createElement('span');
     c.className = 'chip' + (AI_STYLE.tags.includes(t.id) ? ' on' : '');
     c.textContent = t.name;
     c.title = t.desc;
-    c.onclick = () => { c.classList.toggle('on'); asPreview(); };
+    c.onclick = () => { c.classList.toggle('on'); asAutoRefresh(); };
     c.dataset.id = t.id;
     c.dataset.prompt = t.prompt;
     tagsBox.appendChild(c);
   });
   $('as_desc').value = AI_STYLE.business_desc;
   $('as_count').textContent = AI_STYLE.business_desc.length;
-  asPreview();
+  // 编辑器初始值 = 所见即所得：有自定义模板用它，否则按当前标签+描述合成
+  const saved = (AI_STYLE.style_prompt || '').trim();
+  $('as_prompt').value = saved || asSynthesize();
+  $('as_pcount').textContent = $('as_prompt').value.length;
 }
 
-function asPreview() {
+// 按当前选中标签 + 业务描述合成模板文本（与后端 _style_segment 合成规则一致）
+function asSynthesize() {
   const on = [...document.querySelectorAll('#as_tags .chip.on')].map(c => c.dataset.prompt);
   const desc = $('as_desc').value.trim();
-  if (!on.length && !desc) { $('as_preview').textContent = '（未配置——记账助手按通用风格处理）'; return; }
   const parts = [...on, desc ? '业务描述：' + desc : ''];
-  $('as_preview').textContent = '【护栏】仅供理解业务、辅助科目选择与摘要风格，不得凌驾记账规则。\n\n' + parts.join('\n');
+  return parts.join('\n');
+}
+
+// 标签/描述变化联动：编辑器未被手动修改时才自动刷新（防覆盖用户输入）
+function asAutoRefresh() {
+  if (asDirty) return;
+  $('as_prompt').value = asSynthesize();
+  $('as_pcount').textContent = $('as_prompt').value.length;
+}
+
+// 放弃手动修改，按当前标签+描述重新生成
+function asRegen() {
+  asDirty = false;
+  $('as_prompt').value = asSynthesize();
+  $('as_pcount').textContent = $('as_prompt').value.length;
 }
 
 async function saveAiStyle() {
   const tags = [...document.querySelectorAll('#as_tags .chip.on')].map(c => c.dataset.id);
   const business_desc = $('as_desc').value.trim();
+  const style_prompt = $('as_prompt').value.trim();
   if (business_desc.length > 1000) { $('as_msg').textContent = '❌ 业务描述超过 1000 字'; return; }
+  if (style_prompt.length > 2000) { $('as_msg').textContent = '❌ 自定义模板超过 2000 字'; return; }
   $('as_save').disabled = true;
   try {
-    await api(`/api/books/${BOOK.id}/ai-style`, { method: 'PUT', body: JSON.stringify({ tags, business_desc }) });
+    await api(`/api/books/${BOOK.id}/ai-style`, { method: 'PUT', body: JSON.stringify({ tags, business_desc, style_prompt }) });
     $('as_msg').textContent = '✅ 已保存，下次对话即生效';
+    AI_STYLE = { tags, business_desc, style_prompt };
   } catch (e) { $('as_msg').textContent = '❌ ' + e.message; }
   $('as_save').disabled = false;
 }
