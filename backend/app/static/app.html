@@ -356,7 +356,7 @@ function cardHTML(v, mode) {
       <div style="display:flex;gap:.8rem;align-items:center;margin-bottom:.5rem;flex-wrap:wrap">
         <b>凭证日期</b><input type="date" id="vc_date" value="${v.voucher_date}">
         <b>附单据数</b><input id="vc_att" type="number" min="0" value="${v.attachment_count ?? 1}" style="width:60px">
-        <span class="badge ${mode === 'ai' ? '' : 'gray'}">${mode === 'ai' ? 'AI 生成 · 可编辑' : '手工录入'}</span>
+        <span class="badge ${mode === 'ai' ? '' : 'gray'}">${mode === 'ai' ? 'AI 生成 · 可编辑' : mode === 'reference' ? '依据合同/报价单生成 · 建议附发票' : '手工录入'}</span>
       </div>
       <div class="vc-line" style="font-weight:700;color:var(--muted)"><span>摘要</span><span>科目</span><span>往来单位</span><span>现金流量</span><span style="text-align:right">借方</span><span style="text-align:right">贷方</span><span></span></div>
       ${lineEditorHTML(v.lines, 'updLine', 'delLine')}
@@ -364,7 +364,7 @@ function cardHTML(v, mode) {
       ${t.html}
       <div id="vc_err" style="color:var(--danger);font-size:.82rem"></div>
       <button id="vc_confirm" onclick="confirmCard('${mode}')" ${t.ok ? '' : 'disabled'}>确认落账</button>
-      ${mode === 'ai' ? `<button class="ghost" onclick="reSuggest()">重新生成</button>` : ''}
+      ${mode !== 'manual' ? `<button class="ghost" onclick="reSuggest()">重新生成</button>` : ''}
     </div>`;
 }
 
@@ -503,7 +503,7 @@ async function agentChat(docId) {
   if (data.voucher) {
     data.voucher.lines.forEach(l => { if (l.contact_id === undefined) l.contact_id = null; if (l.cf_item === undefined) l.cf_item = null; });
     addBubble(`🤖 ${data.reply || '凭证已生成，请核对：'}`);
-    showCard('ai', data.voucher, docId);
+    showCard(data.doc_type === 'reference' ? 'reference' : 'ai', data.voucher, docId);
   } else {
     addBubble(`🤖 ${data.reply || '（无内容）'}`);
   }
@@ -531,7 +531,7 @@ async function confirmCard(mode) {
   const errEl = card.querySelector('#vc_err');
   try {
     let voucher;
-    if (mode === 'ai') {
+    if (mode === 'ai' || mode === 'reference') {
       voucher = await api('/api/ai/confirm', {
         method: 'POST',
         body: JSON.stringify({ doc_id: cardState.docId, voucher_date, lines: normLines(cardState.voucher.lines) }),

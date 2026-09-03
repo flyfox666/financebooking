@@ -227,6 +227,7 @@ def chat_with_agent(
 
     return {
         "doc_id": doc_id,
+        "doc_type": doc.doc_type if doc is not None else None,
         "reply": result["reply"],
         "voucher": result.get("voucher"),
         "trace": result["trace"],

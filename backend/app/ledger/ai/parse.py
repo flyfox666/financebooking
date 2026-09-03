@@ -224,6 +224,43 @@ def extract_pdf_text(content: bytes) -> tuple[str, bool]:
     return full, bool(full.strip())
 
 
+_W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+DOCX_TEXT_LIMIT = 6000  # 合同/报价单全文截断长度（注入 agent 上下文的护栏）
+
+
+def extract_docx_text(content: bytes) -> str:
+    """提取 docx（本质 zip+XML）正文文本：段落逐行、表格行用「 | 」连接单元格。零第三方依赖。
+
+    提取失败（坏 zip/缺 document.xml/XML 解析错误）返回空串，由上层决定降级。
+    """
+    try:
+        archive = zipfile.ZipFile(BytesIO(content))
+        xml_bytes = archive.read("word/document.xml")
+        root = ElementTree.fromstring(xml_bytes)
+    except (zipfile.BadZipFile, KeyError, ElementTree.ParseError):
+        return ""
+    body = root.find(f"{_W}body")
+    if body is None:
+        return ""
+
+    def _para_text(node) -> str:
+        return "".join(t.text or "" for t in node.iter(f"{_W}t")).strip()
+
+    parts: list[str] = []
+    for child in body:
+        if child.tag == f"{_W}p":
+            text = _para_text(child)
+            if text:
+                parts.append(text)
+        elif child.tag == f"{_W}tbl":
+            for tr in child.iter(f"{_W}tr"):
+                cells = [_para_text(tc) for tc in tr.findall(f"{_W}tc")]
+                row = " | ".join(c for c in cells if c)
+                if row:
+                    parts.append(row)
+    return "\n".join(parts)
+
+
 def parse_pdf_text_fields(text: str) -> dict:
     fields = blank_fields()
 
@@ -396,6 +433,28 @@ def route_and_parse(
                     layers.append(("vlm", vlm_fields(db, png, "image/png")))
                 else:
                     layers.append(("vlm", vlm_fields(db, content, "application/pdf")))
+    elif suffix == ".doc":
+        raise VoucherError("检测到老版 .doc 格式，请用 Word/WPS 另存为 .docx 后上传")
+    elif suffix == ".docx":
+        # 合同/报价单等证据类文件：只提取文本供 AI 理解，不当发票解析
+        source_kind = "docx"
+        text = extract_docx_text(content)
+        if not text:
+            raise VoucherError("docx 文本提取失败（文件可能损坏或不是标准 Word 文档）")
+        docx_warnings = [
+            "合同/报价单等属于参考材料，不能作为税前扣除凭据——依据其入账请务必取得对应发票"
+        ]
+        if len(text) > DOCX_TEXT_LIMIT:
+            text = text[:DOCX_TEXT_LIMIT]
+            docx_warnings.append(f"文档较长，已截断前 {DOCX_TEXT_LIMIT} 字供 AI 理解")
+        return {
+            "doc_type": "reference",
+            "source_kind": source_kind,
+            "fields": {"note": text},
+            "warnings": docx_warnings,
+            "layers": ["docx"],
+            "extra_docs": [],
+        }
     elif suffix in IMAGE_EXTS:
         source_kind = "image"
         qr = decode_qr_fields(content)
