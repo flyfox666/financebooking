@@ -11,7 +11,7 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.ledger.ai import parse as ai_parse
 from app.ledger.ai import suggest as ai_suggest
-from app.ledger.exceptions import LedgerError
+from app.ledger.exceptions import LedgerError, VoucherError
 from app.models.ai import AIDoc
 from app.models.user import User
 from app.schemas.ai import ChatIn, ConfirmIn, SuggestIn
@@ -37,6 +37,18 @@ def _doc_summary(doc: AIDoc) -> dict:
     }
 
 
+def _degraded_result(reason: str) -> dict:
+    """解析失败时的降级结果：原件已存 staging，用户可在对话中补充描述走人工路径。"""
+    return {
+        "doc_type": "unknown",
+        "source_kind": "file",
+        "fields": {},
+        "warnings": [f"自动识别失败（{reason}），原件已保存，请在对话中补充业务描述或手动录入凭证"],
+        "layers": [],
+        "degraded": True,
+    }
+
+
 @router.post("/parse")
 async def parse_document(
     book_id: int,
@@ -52,10 +64,15 @@ async def parse_document(
     if file is not None:
         content = await file.read()
         filename = file.filename or ""
+        # 解析失败是正常业务路径而非异常：除"文件类型不识别"外一律降级，绝不 500
         try:
             result = ai_parse.route_and_parse(db, filename=filename, content=content, allow_vlm=allow_vlm)
-        except LedgerError as exc:
+        except VoucherError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+        except LedgerError as exc:  # 视觉模型不可用/输出异常等
+            result = _degraded_result(str(exc))
+        except Exception:  # noqa: BLE001 - 兜住一切内部 bug（如漏 import 的 NameError）
+            result = _degraded_result("内部解析异常")
 
         staging_path = ""
         if content:

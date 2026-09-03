@@ -455,7 +455,8 @@ async function send() {
       if (!resp.ok) throw new Error(await errorText(resp));
       doc = await resp.json();
       const warnHtml = (doc.warnings || []).map(w => `<div class="warn">⚠ ${w}</div>`).join('');
-      addBubble(`📄 已解析（${doc.source_kind}）：${Object.values(doc.fields).filter(v => v).join(' ｜ ') || '无字段'}${warnHtml}`);
+      const head = doc.degraded ? '⚠ 自动识别失败，原件已保存' : `📄 已解析（${doc.source_kind}）`;
+      addBubble(`${head}：${Object.values(doc.fields).filter(v => v).join(' ｜ ') || '无字段'}${warnHtml}`);
     } else {
       const form = new FormData();
       form.append('note', text);

@@ -4,6 +4,7 @@
 关键字段缺失时自动调用视觉模型补全。整个模块不依赖 FastAPI。
 """
 
+import base64
 import json
 import re
 import zipfile
@@ -19,7 +20,18 @@ from app.ledger.exceptions import LLMError, VoucherError
 from app.ledger.llm import gateway
 
 TWO = Decimal("0.01")
-IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".heic", ".heif"}
+# HEIC/HEIF 是 iPhone 拍照默认格式：装了 pillow-heif 就注册解码器，没装则退化为仅 VLM 识别
+try:
+    from pillow_heif import register_heif_opener as _register_heif_opener
+
+    _register_heif_opener()
+except ImportError:
+    pass
+IMAGE_MIME = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".webp": "image/webp", ".bmp": "image/bmp", ".heic": "image/heic", ".heif": "image/heic",
+}
 FIELD_KEYS = [
     "invoice_type", "invoice_no", "invoice_code", "invoice_date",
     "seller_name", "seller_tax_no", "buyer_name", "buyer_tax_no",
@@ -357,8 +369,7 @@ def route_and_parse(
         if any(value for value in qr.values()):
             layers.append(("qr", qr))
         if allow_vlm:
-            mime = "image/png" if suffix == ".png" else "image/jpeg"
-            layers.append(("vlm", vlm_fields(db, content, mime)))
+            layers.append(("vlm", vlm_fields(db, content, IMAGE_MIME.get(suffix, "image/jpeg"))))
     else:
         text = content.decode("utf-8", "ignore").strip()
         if note := text:
