@@ -10,7 +10,7 @@ from app.ledger.ai.parse import (
     parse_xml_fields,
     route_and_parse,
 )
-from tests.mock_files import pdf_invoice_bytes, plain_png_bytes, qr_invoice_png, xml_invoice_bytes
+from tests.mock_files import docx_bytes, pdf_invoice_bytes, plain_png_bytes, qr_invoice_png, xml_invoice_bytes
 
 
 def _patch_gateway(monkeypatch, field_overrides: dict | None = None, documents: list[dict] | None = None):
@@ -288,6 +288,51 @@ def test_parse_creates_extra_doc_records(client, auth_headers, db_session, book,
     assert len(docs) == 2
     assert docs[0].staging_path == docs[1].staging_path
     assert json.loads(docs[1].fields_json)["invoice_no"] == "25317000000123456702"
+
+
+def test_docx_reference_route(db_session):
+    """docx 合同/报价单 → doc_type=reference：段落+表格文本提取，非扣除凭据提醒。"""
+    result = route_and_parse(
+        db_session, filename="合同.docx", content=docx_bytes(
+            paragraphs=["软件开发服务合同", "甲方委托乙方开发记账系统。"],
+            table_rows=[["项目", "金额（元）"], ["开发费", "50000"], ["维护费", "5000/年"]],
+        ),
+    )
+    assert result["doc_type"] == "reference"
+    assert result["source_kind"] == "docx"
+    assert result["layers"] == ["docx"]
+    assert "软件开发服务合同" in result["fields"]["note"]
+    assert "开发费 | 50000" in result["fields"]["note"]  # 表格行以 | 连接
+    assert any("扣除凭据" in warning for warning in result["warnings"])
+
+
+def test_docx_long_text_truncated(db_session):
+    """超长合同截断到 6000 字并提示。"""
+    result = route_and_parse(
+        db_session, filename="long.docx", content=docx_bytes(paragraphs=["甲" * 7000])
+    )
+    assert len(result["fields"]["note"]) == 6000
+    assert any("截断" in warning for warning in result["warnings"])
+
+
+def test_doc_old_format_rejected(db_session):
+    """老版 .doc（OLE 二进制）→ 明确提示另存为 docx，不硬解析。"""
+    import pytest
+
+    from app.ledger.exceptions import VoucherError
+
+    with pytest.raises(VoucherError, match="docx"):
+        route_and_parse(db_session, filename="old.doc", content=b"\xd0\xcf\x11\xe0junk")
+
+
+def test_docx_broken_rejected(db_session):
+    """.docx 后缀但内容损坏 → 友好报错而非 500。"""
+    import pytest
+
+    from app.ledger.exceptions import VoucherError
+
+    with pytest.raises(VoucherError, match="提取失败"):
+        route_and_parse(db_session, filename="broken.docx", content=b"not-a-zip")
 
 
 def test_merge_fields_conflict_warning():
