@@ -917,7 +917,10 @@ async function createContactNew() {
 
 /* ---------- 科目余额表（完整树形） ---------- */
 async function renderTB() {
-  $('mainArea').innerHTML = `<h3 class="view-title">📊 科目余额表（${PERIOD}）</h3><div id="t_body">加载中…</div>`;
+  $('mainArea').innerHTML = `<h3 class="view-title" style="display:flex;align-items:center;gap:.7rem;flex-wrap:wrap">📊 科目余额表
+    <input type="month" id="r_period" value="${PERIOD}" onchange="reportPeriodChanged(this.value)"
+      style="font-weight:400;padding:.15rem .4rem;border:1px solid var(--rule);border-radius:6px;font-size:.95rem">
+  </h3><div id="t_body">加载中…</div>`;
   try {
     const r = await api(`/api/reports/trial-balance?book_id=${BOOK.id}&period=${PERIOD}&complete=true`);
     const rows = r.rows;
@@ -951,7 +954,10 @@ async function renderAuxBalance(accountCode) {
 let reportTab = 'bs';
 
 function renderReports() {
-  $('mainArea').innerHTML = `<h3 class="view-title">📑 报表模块（${PERIOD}）</h3>
+  $('mainArea').innerHTML = `<h3 class="view-title" style="display:flex;align-items:center;gap:.7rem;flex-wrap:wrap">📑 报表模块
+    <input type="month" id="r_period" value="${PERIOD}" onchange="reportPeriodChanged(this.value)"
+      style="font-weight:400;padding:.15rem .4rem;border:1px solid var(--rule);border-radius:6px;font-size:.95rem">
+  </h3>
     <div class="chips" id="r_tabs"></div><div id="t_body">加载中…</div>`;
   [['bs', '资产负债表'], ['is', '利润表'], ['cf', '现金流量表'], ['tpl', '映射体检']].forEach(([key, label]) => {
     const chip = document.createElement('span');
@@ -961,6 +967,14 @@ function renderReports() {
     $('r_tabs').appendChild(chip);
   });
   loadReport(reportTab);
+}
+
+function reportPeriodChanged(v) {
+  if (!v) return;
+  PERIOD = v;
+  $('period').value = v;   // 双向同步门楣期间
+  loadSummary();           // 右栏概要跟随切换
+  if (currentView !== 'chat') switchView(currentView);  // 保持当前视图/报表页签，按新月份重查
 }
 
 async function loadReport(kind) {
