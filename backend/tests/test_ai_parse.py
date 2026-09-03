@@ -13,22 +13,25 @@ from app.ledger.ai.parse import (
 from tests.mock_files import pdf_invoice_bytes, plain_png_bytes, qr_invoice_png, xml_invoice_bytes
 
 
-def _patch_gateway(monkeypatch, **field_overrides):
-    """mock 最外层 gateway.chat_vision（而非 vlm_fields），让真实 vlm_fields→_to_data_url 链路被执行。
+def _patch_gateway(monkeypatch, field_overrides: dict | None = None, documents: list[dict] | None = None):
+    """mock 最外层 gateway.chat_vision（而非 vlm_fields），让真实 vlm_documents→_to_data_url 链路被执行。
 
     背景：曾因 parse.py 漏 import base64 导致线上 500，而 mock vlm_fields 的用例全绿——
     教训：只 mock IO 层，业务函数本身必须跑真代码。
+    documents 不传时默认单张发票（field_overrides 覆盖其字段）。
     """
-
-    def fake_chat_vision(db, *, text, image_data_url, json_mode, **kwargs):
-        assert image_data_url.startswith("data:"), "真实 _to_data_url 应产出 data URL"
+    if documents is None:
         payload = {key: "" for key in (
             "invoice_type", "invoice_no", "invoice_code", "invoice_date",
             "seller_name", "seller_tax_no", "buyer_name", "buyer_tax_no",
             "goods_name", "amount_excl", "tax_rate", "tax_amount", "amount_total", "status",
         )}
-        payload.update(field_overrides)
-        return {"content": json.dumps(payload, ensure_ascii=False)}
+        payload.update(field_overrides or {})
+        documents = [{"kind": "invoice", "fields": payload}]
+
+    def fake_chat_vision(db, *, text, image_data_url, json_mode, **kwargs):
+        assert image_data_url.startswith("data:"), "真实 _to_data_url 应产出 data URL"
+        return {"content": json.dumps(documents, ensure_ascii=False)}
 
     monkeypatch.setattr("app.ledger.llm.gateway.chat_vision", fake_chat_vision)
 
@@ -101,7 +104,7 @@ def test_pdf_text_layer_route(db_session):
 
 
 def test_vlm_fallback_for_image_pdf(db_session, monkeypatch):
-    _patch_gateway(monkeypatch, invoice_no="25317000000123456701", amount_total="11300.00")
+    _patch_gateway(monkeypatch, {"invoice_no": "25317000000123456701", "amount_total": "11300.00"})
     result = route_and_parse(
         db_session,
         filename="scan.pdf",
@@ -118,7 +121,7 @@ def test_vlm_for_photo_with_qr_priority(db_session, monkeypatch):
         "app.ledger.ai.parse.decode_qr_fields",
         lambda content: parse_invoice_qr_payload("01,31,25317000000123456701,113.00,05082026,8475"),
     )
-    _patch_gateway(monkeypatch, amount_total="119.00", seller_name="视觉模型识别的店")
+    _patch_gateway(monkeypatch, {"amount_total": "119.00", "seller_name": "视觉模型识别的店"})
     result = route_and_parse(
         db_session, filename="photo.png", content=qr_invoice_png(), allow_vlm=True
     )
@@ -131,7 +134,7 @@ def test_vlm_for_photo_with_qr_priority(db_session, monkeypatch):
 
 def test_image_real_chain_smoke(db_session, monkeypatch):
     """真实链路冒烟：图片走 QR 解码（真 pyzbar）+ 真实 vlm_fields（含 base64 编码），只 mock gateway。"""
-    _patch_gateway(monkeypatch, invoice_no="25317000000123456701", amount_total="113.00")
+    _patch_gateway(monkeypatch, {"invoice_no": "25317000000123456701", "amount_total": "113.00"})
     result = route_and_parse(
         db_session, filename="photo.png", content=plain_png_bytes(), allow_vlm=True
     )
@@ -213,6 +216,78 @@ def test_parse_degrades_on_llm_error(client, auth_headers, db_session, book, att
     assert any("视觉模型未配置" in warning for warning in data["warnings"])
     doc = db_session.query(AIDoc).order_by(AIDoc.id.desc()).first()
     assert doc is not None and doc.staging_path
+
+
+def test_payment_screenshot_route(db_session, monkeypatch):
+    """支付截图：VLM 分类为 payment → doc_type=payment，字段走 PAYMENT_KEYS。"""
+    _patch_gateway(monkeypatch, documents=[{
+        "kind": "payment",
+        "fields": {"channel": "微信", "pay_direction": "pay", "counterparty": "阿里云计算有限公司",
+                   "amount_total": "320", "pay_time": "2026-09-03 10:21", "note": "云服务器年费"},
+    }])
+    result = route_and_parse(
+        db_session, filename="wechat-pay.png", content=plain_png_bytes(), allow_vlm=True
+    )
+    assert result["doc_type"] == "payment"
+    assert result["fields"]["channel"] == "微信"
+    assert result["fields"]["amount_total"] == "320.00"  # 金额归一化两位小数
+    assert result["fields"]["pay_direction"] == "pay"
+    assert result["extra_docs"] == []
+
+
+def test_multi_invoice_split(db_session, monkeypatch):
+    """一图两票：主结果取第一张，第二张进 extra_docs。"""
+    inv1 = {"invoice_no": "25317000000123456701", "amount_total": "113.00"}
+    inv2 = {"invoice_no": "25317000000123456702", "amount_total": "226.00"}
+    _patch_gateway(monkeypatch, documents=[
+        {"kind": "invoice", "fields": inv1}, {"kind": "invoice", "fields": inv2},
+    ])
+    result = route_and_parse(
+        db_session, filename="two-invoices.jpg", content=plain_png_bytes(), allow_vlm=True
+    )
+    assert result["doc_type"] == "invoice"
+    assert result["fields"]["invoice_no"] == "25317000000123456701"
+    assert len(result["extra_docs"]) == 1
+    assert result["extra_docs"][0]["doc_type"] == "invoice"
+    assert result["extra_docs"][0]["fields"]["invoice_no"] == "25317000000123456702"
+
+
+def test_mixed_invoice_and_payment(db_session, monkeypatch):
+    """一图一票一支付：发票为主单据，支付记录进 extra_docs。"""
+    _patch_gateway(monkeypatch, documents=[
+        {"kind": "invoice", "fields": {"invoice_no": "25317000000123456701", "amount_total": "113.00"}},
+        {"kind": "payment", "fields": {"channel": "支付宝", "pay_direction": "pay",
+                                       "amount_total": "113.00", "counterparty": "某某公司"}},
+    ])
+    result = route_and_parse(
+        db_session, filename="mixed.png", content=plain_png_bytes(), allow_vlm=True
+    )
+    assert result["doc_type"] == "invoice"
+    assert len(result["extra_docs"]) == 1
+    assert result["extra_docs"][0]["doc_type"] == "payment"
+    assert result["extra_docs"][0]["fields"]["channel"] == "支付宝"
+
+
+def test_parse_creates_extra_doc_records(client, auth_headers, db_session, book, attachments_dir, monkeypatch):
+    """API 级：多票据 → 主 doc + extra_doc_ids 各建一条 AIDoc（共用 staging 原件）。"""
+    from app.models.ai import AIDoc
+
+    _patch_gateway(monkeypatch, documents=[
+        {"kind": "invoice", "fields": {"invoice_no": "25317000000123456701", "amount_total": "113.00"}},
+        {"kind": "invoice", "fields": {"invoice_no": "25317000000123456702", "amount_total": "226.00"}},
+    ])
+    resp = client.post(
+        f"/api/ai/parse?book_id={book.id}",
+        headers=auth_headers,
+        files={"file": ("two.png", plain_png_bytes(), "image/png")},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["extra_doc_ids"] and len(data["extra_doc_ids"]) == 1
+    docs = db_session.query(AIDoc).filter(AIDoc.book_id == book.id).order_by(AIDoc.id).all()
+    assert len(docs) == 2
+    assert docs[0].staging_path == docs[1].staging_path
+    assert json.loads(docs[1].fields_json)["invoice_no"] == "25317000000123456702"
 
 
 def test_merge_fields_conflict_warning():
