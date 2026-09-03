@@ -1,5 +1,5 @@
 from app.models.account import Account
-from app.models.ai import AIDoc
+from app.models.ai import AIDoc, AiStyleSetting
 from app.models.attachment import Attachment
 from app.models.book import Book
 from app.models.contact import Contact
@@ -24,5 +24,6 @@ __all__ = [
     "TaxParam",
     "LLMProvider",
     "AIDoc",
+    "AiStyleSetting",
     "Contact",
 ]

@@ -15,9 +15,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ledger import aux_service, voucher_service
+from app.ledger.ai.packs import STYLE_GUARD_HEAD, TAGS
 from app.ledger.exceptions import LedgerError
 from app.ledger.llm.gateway import chat_with_tools
 from app.models.account import Account
+from app.models.ai import AiStyleSetting
 from app.models.book import Book
 from app.models.contact import Contact
 from app.models.tax import Invoice
@@ -468,6 +470,29 @@ def _tax_rule(book: Book | None) -> str:
     )
 
 
+def _style_segment(db: Session, book_id: int) -> str:
+    """账套级行业标签 + 业务描述 → 提示词风格段（包在护栏文本内）。
+
+    未配置（无记录，或标签与描述全空）返回空串——行为与历史版本完全一致。
+    非法标签静默丢弃（标签库随代码演进，存量配置可能引用已下线标签）。
+    """
+    setting = db.scalar(select(AiStyleSetting).where(AiStyleSetting.book_id == book_id))
+    if setting is None:
+        return ""
+    try:
+        raw_tags = json.loads(setting.tags_json or "[]")
+    except (json.JSONDecodeError, TypeError):
+        raw_tags = []
+    tags = [t for t in raw_tags if t in TAGS]
+    desc = (setting.business_desc or "").strip()
+    if not tags and not desc:
+        return ""
+    parts = [TAGS[t]["prompt"] for t in tags]
+    if desc:
+        parts.append("业务描述：" + desc)
+    return "\n\n" + STYLE_GUARD_HEAD + "\n" + "\n".join(parts)
+
+
 def run_agent(db: Session, *, book_id: int, history: list[dict], doc_context: str = "") -> dict:
     """执行智能体循环，返回 {reply, voucher, trace, stopped_by_ask_user}。"""
     # 查询当前账套的公司信息，并注入当前日期（模型无法自行得知今天几号）
@@ -482,7 +507,7 @@ def run_agent(db: Session, *, book_id: int, history: list[dict], doc_context: st
     else:
         company_info += "\n\n当前账套信息：未获取到账套，默认按小规模纳税人处理价税。" + _tax_rule(None)
 
-    messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT + company_info}]
+    messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT + company_info + _style_segment(db, book_id)}]
     if doc_context:
         messages[0]["content"] += f"\n\n当前用户提供的单据解析结果（已结构化，可直接使用）：\n{doc_context}"
     messages.extend(history)

@@ -22,3 +22,15 @@ class AIDoc(Base):
     voucher_id: Mapped[int | None] = mapped_column(ForeignKey("voucher.id"), default=None)
     status: Mapped[str] = mapped_column(String(16), default="parsed", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class AiStyleSetting(Base):
+    """账套级 AI 记账偏好：行业标签（多选）+ 业务描述（限长）。一账套一条。"""
+
+    __tablename__ = "ai_style_setting"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey("book.id"), unique=True, index=True)
+    tags_json: Mapped[str] = mapped_column(Text, default="[]")
+    business_desc: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

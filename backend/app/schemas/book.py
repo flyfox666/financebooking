@@ -25,3 +25,8 @@ class BookOut(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class AiStyleIn(BaseModel):
+    tags: list[str] = []
+    business_desc: str = Field(default="", max_length=1000)

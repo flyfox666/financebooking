@@ -1,14 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_admin
 from app.core.database import get_db
 from app.ledger import account_service, aux_service, book_service
+from app.ledger.ai.packs import TAGS
 from app.ledger.exceptions import LedgerError
+from app.models.ai import AiStyleSetting
 from app.models.book import Book
 from app.models.user import User
 from app.schemas.account import AccountCreate, AccountNode, AccountOut, AccountPatch
-from app.schemas.book import BookCreate, BookOut
+from app.schemas.book import AiStyleIn, BookCreate, BookOut
 from app.schemas.report import OpeningSetIn
 
 router = APIRouter(prefix="/api", tags=["books"])
@@ -82,6 +85,58 @@ def set_opening(
         )
     except LedgerError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/books/{book_id}/ai-style")
+def get_ai_style(
+    book_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if db.get(Book, book_id) is None:
+        raise HTTPException(status_code=404, detail="账套不存在")
+    setting = db.scalar(select(AiStyleSetting).where(AiStyleSetting.book_id == book_id))
+    if setting is None:
+        current = {"tags": [], "business_desc": ""}
+    else:
+        import json as _json
+
+        try:
+            tags = [t for t in _json.loads(setting.tags_json or "[]") if t in TAGS]
+        except (_json.JSONDecodeError, TypeError):
+            tags = []
+        current = {"tags": tags, "business_desc": setting.business_desc or ""}
+    return {
+        "tags": [
+            {"id": key, "name": value["name"], "desc": value["desc"], "prompt": value["prompt"]}
+            for key, value in TAGS.items()
+        ],
+        "current": current,
+    }
+
+
+@router.put("/books/{book_id}/ai-style")
+def put_ai_style(
+    book_id: int,
+    body: AiStyleIn,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    if db.get(Book, book_id) is None:
+        raise HTTPException(status_code=404, detail="账套不存在")
+    invalid = [t for t in body.tags if t not in TAGS]
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"未知行业标签：{'、'.join(invalid)}")
+    import json as _json
+
+    setting = db.scalar(select(AiStyleSetting).where(AiStyleSetting.book_id == book_id))
+    if setting is None:
+        setting = AiStyleSetting(book_id=book_id)
+        db.add(setting)
+    setting.tags_json = _json.dumps(body.tags, ensure_ascii=False)
+    setting.business_desc = body.business_desc.strip()
+    db.commit()
+    return {"tags": body.tags, "business_desc": setting.business_desc}
 
 
 @router.get("/accounts", response_model=list[AccountNode])

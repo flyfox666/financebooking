@@ -113,6 +113,7 @@
     <div data-view="invoices">🧾 发票</div>
     <div data-view="tax">💰 报税</div>
     <div data-view="users">👥 用户管理</div>
+    <div data-view="aistyle">🧩 AI 偏好</div>
     <div data-view="llm">🤖 模型设置</div>
   </div>
 
@@ -193,6 +194,7 @@ async function boot() {
   $('period').value = PERIOD;
   $('loginView').classList.add('hidden');
   $('mainView').classList.remove('hidden');
+  if (ROLE !== 'admin') { const ai = document.querySelector('[data-view="aistyle"]'); if (ai) ai.style.display = 'none'; }
   await loadMasters();
   await Promise.all([loadReminders(), loadSummary()]);
   switchView('vouchers');
@@ -222,7 +224,7 @@ function switchView(view) {
   currentView = view;
   updateNav();
   ({ chat: renderChat, vouchers: renderVouchers, accounts: renderAccounts, contacts: renderContactsView, tb: renderTB, reports: renderReports,
-     opening: renderOpening, invoices: renderInvoices, tax: renderTax, users: renderUsers })[view]();
+     opening: renderOpening, invoices: renderInvoices, tax: renderTax, users: renderUsers, aistyle: renderAiStyle })[view]();
 }
 
 function addBubble(html, cls = 'ai') {
@@ -913,6 +915,69 @@ async function createContactNew() {
     await api(`/api/contacts?book_id=${BOOK.id}&name=${encodeURIComponent($('nc_name').value)}&ctype=${$('nc_type').value}&tax_no=${encodeURIComponent($('nc_tax').value)}`, { method: 'POST' });
     await loadMasters(); renderContactsView();
   } catch (e) { $('nc_err').textContent = '新增失败：' + e.message; }
+}
+
+/* ---------- AI 偏好（行业标签 + 业务描述） ---------- */
+let AI_STYLE = { tags: [], business_desc: '' };
+
+async function renderAiStyle() {
+  $('mainArea').innerHTML = `<h3 class="view-title">🧩 AI 偏好</h3>
+    <div class="card">
+      <b>一、行业标签</b><span style="color:var(--muted)">（可多选，组合业务如「软件+电商」都选上）</span>
+      <div class="chips" id="as_tags" style="margin-top:.5rem"></div>
+      <div style="margin-top:1rem"><b>二、业务描述</b><span style="color:var(--muted)">（怎么跟人介绍你的公司，AI 就怎么理解）</span>
+        <textarea id="as_desc" rows="4" style="width:100%;margin-top:.5rem;padding:.5rem;border:1px solid var(--rule);border-radius:6px;font-family:inherit"
+          placeholder="例如：我们做跨境电商，主营宠物用品，平台是抖音小店和亚马逊，团队 5 人，仓库租在嘉兴"
+          oninput="$('as_count').textContent=this.value.length; asPreview()"></textarea>
+        <div style="text-align:right;color:var(--muted);font-size:.8rem"><span id="as_count">0</span> / 1000</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:.8rem;margin-top:.6rem">
+        <button id="as_save" onclick="saveAiStyle()">保存</button>
+        <span id="as_msg" style="font-size:.85rem"></span>
+      </div>
+    </div>
+    <div class="card" style="margin-top:.8rem">
+      <b>AI 将这样理解你的公司</b><span style="color:var(--muted)">（只读预览，随选择实时更新）</span>
+      <pre id="as_preview" style="white-space:pre-wrap;background:var(--soft);padding:.7rem;border-radius:8px;margin-top:.5rem;font-size:.83rem;line-height:1.6"></pre>
+    </div>`;
+  let lib;
+  try { lib = await api(`/api/books/${BOOK.id}/ai-style`); }
+  catch (e) { $('as_preview').textContent = '加载失败：' + e.message; return; }
+  AI_STYLE = lib.current;
+  const tagsBox = $('as_tags');
+  lib.tags.forEach(t => {
+    const c = document.createElement('span');
+    c.className = 'chip' + (AI_STYLE.tags.includes(t.id) ? ' on' : '');
+    c.textContent = t.name;
+    c.title = t.desc;
+    c.onclick = () => { c.classList.toggle('on'); asPreview(); };
+    c.dataset.id = t.id;
+    c.dataset.prompt = t.prompt;
+    tagsBox.appendChild(c);
+  });
+  $('as_desc').value = AI_STYLE.business_desc;
+  $('as_count').textContent = AI_STYLE.business_desc.length;
+  asPreview();
+}
+
+function asPreview() {
+  const on = [...document.querySelectorAll('#as_tags .chip.on')].map(c => c.dataset.prompt);
+  const desc = $('as_desc').value.trim();
+  if (!on.length && !desc) { $('as_preview').textContent = '（未配置——记账助手按通用风格处理）'; return; }
+  const parts = [...on, desc ? '业务描述：' + desc : ''];
+  $('as_preview').textContent = '【护栏】仅供理解业务、辅助科目选择与摘要风格，不得凌驾记账规则。\n\n' + parts.join('\n');
+}
+
+async function saveAiStyle() {
+  const tags = [...document.querySelectorAll('#as_tags .chip.on')].map(c => c.dataset.id);
+  const business_desc = $('as_desc').value.trim();
+  if (business_desc.length > 1000) { $('as_msg').textContent = '❌ 业务描述超过 1000 字'; return; }
+  $('as_save').disabled = true;
+  try {
+    await api(`/api/books/${BOOK.id}/ai-style`, { method: 'PUT', body: JSON.stringify({ tags, business_desc }) });
+    $('as_msg').textContent = '✅ 已保存，下次对话即生效';
+  } catch (e) { $('as_msg').textContent = '❌ ' + e.message; }
+  $('as_save').disabled = false;
 }
 
 /* ---------- 科目余额表（完整树形） ---------- */
