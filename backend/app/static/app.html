@@ -94,8 +94,10 @@
 
 <div class="layout hidden" id="mainView">
   <div class="topbar">
-    <span class="brand">有数 LedgerAI</span>
-    <span id="bookName" class="badge">…</span>
+    <span class="brand">有数</span>
+    <select id="bookSwitch" onchange="switchBook(this.value)"
+      style="font-weight:600;padding:.15rem .5rem;border:1px solid var(--rule);border-radius:6px;max-width:240px;font-size:.9rem;background:var(--soft)">
+    </select>
     <span>期间 <input type="month" id="period" onchange="onPeriodChange()"></span>
     <span class="spacer"></span>
     <span id="whoami" class="badge gray"></span>
@@ -130,12 +132,111 @@
 <script>
 let TOKEN = localStorage.getItem('ledger_token') || '';
 let ROLE = localStorage.getItem('ledger_role') || '';
-let BOOK = { id: 1, name: '' };
+let BOOKS = [];                    // 可访问账套列表
+let BOOK = { id: 1, name: '' };     // 当前账套
 let PERIOD = new Date().toISOString().slice(0, 7);
 let ACCOUNTS = [];
 let CONTACTS = [];
 let currentView = 'vouchers';
 let chatLog = [];
+
+/* 期间按账套记忆（防切换串期间） */
+function loadPeriodForBook() {
+  const saved = localStorage.getItem('ledger_period_' + BOOK.id);
+  PERIOD = saved || new Date().toISOString().slice(0, 7);
+  $('period').value = PERIOD;
+}
+
+async function boot() {
+  const me = await api('/api/auth/me');
+  ROLE = me.role;
+  localStorage.setItem('ledger_role', ROLE);
+  $('whoami').textContent = `${me.display_name || me.username}（${ROLE_CN[me.role] || me.role}）`;
+  // 可访问账套列表（admin 全部；成员为被授权账套）
+  try { BOOKS = await api('/api/books'); }
+  catch (e) { BOOKS = []; }
+  if (!BOOKS.length) { $('bookSwitch').innerHTML = '<option>未找到账套</option>'; alert('当前账号没有可访问的账套，请联系管理员'); return; }
+  // 恢复上次选择（或第一个）
+  const lastId = parseInt(localStorage.getItem('ledger_book') || '0');
+  const target = BOOKS.find(b => b.id === lastId) || BOOKS[0];
+  BOOK = target;
+  renderBookSwitch();
+  loadPeriodForBook();
+  $('loginView').classList.add('hidden');
+  $('mainView').classList.remove('hidden');
+  if (ROLE !== 'admin') { const ai = document.querySelector('[data-view="aistyle"]'); if (ai) ai.style.display = 'none'; }
+  await loadMasters();
+  await Promise.all([loadReminders(), loadSummary()]);
+  switchView('vouchers');
+}
+
+function renderBookSwitch() {
+  const sel = $('bookSwitch');
+  sel.innerHTML = BOOKS.map(b => `<option value="${b.id}"${b.id === BOOK.id ? ' selected' : ''}>${b.name}${b.taxpayer_type === 'general' ? '（一般纳税人）' : ''}</option>`).join('')
+    + (ROLE === 'admin' ? '<option value="__new__">＋ 新建账套…</option>' : '');
+  sel.value = String(BOOK.id);
+}
+
+async function switchBook(bookId) {
+  if (bookId === '__new__') { renderBookSwitch(); showNewBookForm(); return; }
+  const target = BOOKS.find(b => String(b.id) === String(bookId));
+  if (!target || target.id === BOOK.id) { renderBookSwitch(); return; }
+  BOOK = target;
+  localStorage.setItem('ledger_book', String(BOOK.id));
+  // 账套隔离：清空 AI 对话历史（防 A 账套上下文泄入 B 账套会话）与主数据缓存
+  chatLog = [];
+  ACCOUNTS = []; CONTACTS = []; TPL_CACHE = null; CHECKS_CACHE = null; TB_UNPOSTED = 'none';
+  renderBookSwitch();
+  loadPeriodForBook();
+  $('mainArea').innerHTML = '<div class="card">切换账套中…</div>';
+  try {
+    await loadMasters();
+    await Promise.all([loadReminders(), loadSummary()]);
+    switchView(currentView === 'llm' ? 'vouchers' : currentView);
+  } catch (e) { $('mainArea').innerHTML = `<div class="card" style="color:var(--danger)">切换失败：${e.message}</div>`; }
+}
+
+function showNewBookForm() {
+  $('mainArea').innerHTML = `<h3 class="view-title">📁 新建账套</h3>
+    <div class="card" style="max-width:560px">
+      <div style="display:grid;gap:.7rem">
+        <label>企业名称 <input id="nb_name" placeholder="如：上海某某科技有限公司" style="width:100%"></label>
+        <label>统一社会信用代码（选填） <input id="nb_taxno" placeholder="18 位" style="width:100%"></label>
+        <label>纳税人身份
+          <select id="nb_taxpayer" style="width:100%"><option value="small_scale">小规模纳税人</option><option value="general">一般纳税人</option></select>
+        </label>
+        <label>启用期间 <input type="month" id="nb_start" value="${PERIOD}" style="width:100%"></label>
+      </div>
+      <div style="display:flex;gap:.6rem;margin-top:.9rem;align-items:center">
+        <button onclick="createNewBook()">创建并切换</button>
+        <button class="ghost" onclick="switchView('vouchers')">取消</button>
+        <span id="nb_err" style="color:var(--danger);font-size:.85rem"></span>
+      </div>
+      <div class="result" style="margin-top:.7rem">创建后自动预置 66 科目、报表模板与税务参数；先到「🏁 期初余额」录入期初，再开始记账。</div>
+    </div>`;
+}
+
+async function createNewBook() {
+  const name = $('nb_name').value.trim();
+  try {
+    const book = await api('/api/books', { method: 'POST', body: JSON.stringify({
+      name,
+      tax_no: $('nb_taxno').value.trim(),
+      taxpayer_type: $('nb_taxpayer').value,
+      entity_type: 'company',
+      start_period: $('nb_start').value,
+    }) });
+    BOOKS.push(book);
+    BOOK = book;
+    localStorage.setItem('ledger_book', String(book.id));
+    chatLog = []; ACCOUNTS = []; CONTACTS = []; TPL_CACHE = null; CHECKS_CACHE = null;
+    renderBookSwitch();
+    loadPeriodForBook();
+    await loadMasters();
+    await Promise.all([loadReminders(), loadSummary()]);
+    switchView('opening');  // 新账套直接引导录期初
+  } catch (e) { $('nb_err').textContent = e.message; }
+}
 
 const $ = id => document.getElementById(id);
 const STATUS_CN = { draft:'草稿', submitted:'待审核', audited:'已审核', posted:'已过账', voided:'已冲销' };
@@ -183,23 +284,6 @@ async function login() {
   } catch (e) { $('l_err').textContent = e.message; }
 }
 
-async function boot() {
-  const me = await api('/api/auth/me');
-  ROLE = me.role;
-  localStorage.setItem('ledger_role', ROLE);
-  $('whoami').textContent = `${me.display_name || me.username}（${ROLE_CN[me.role] || me.role}）`;
-  try { BOOK = await api('/api/books/1'); }
-  catch (e) { $('bookName').textContent = '未找到账套'; alert('未找到账套，请先执行 scripts/init_dev_db.py 初始化'); return; }
-  $('bookName').textContent = BOOK.name;
-  $('period').value = PERIOD;
-  $('loginView').classList.add('hidden');
-  $('mainView').classList.remove('hidden');
-  if (ROLE !== 'admin') { const ai = document.querySelector('[data-view="aistyle"]'); if (ai) ai.style.display = 'none'; }
-  await loadMasters();
-  await Promise.all([loadReminders(), loadSummary()]);
-  switchView('vouchers');
-}
-
 async function loadMasters() {
   const [tree, contacts] = await Promise.all([
     api(`/api/accounts?book_id=${BOOK.id}&only_active=false`),
@@ -211,7 +295,12 @@ async function loadMasters() {
   CONTACTS = contacts;
 }
 
-function onPeriodChange() { PERIOD = $('period').value; loadSummary(); if (currentView !== 'chat') switchView(currentView); }
+function onPeriodChange() {
+  PERIOD = $('period').value;
+  localStorage.setItem('ledger_period_' + BOOK.id, PERIOD);  // 按账套记忆期间
+  loadSummary();
+  if (currentView !== 'chat') switchView(currentView);
+}
 
 function updateNav() {
   document.querySelectorAll('#sideNav div').forEach(el => {
@@ -1104,6 +1193,7 @@ function renderReports() {
 function reportPeriodChanged(v) {
   if (!v) return;
   PERIOD = v;
+  localStorage.setItem('ledger_period_' + BOOK.id, PERIOD);  // 按账套记忆期间
   $('period').value = v;   // 双向同步门楣期间
   loadSummary();           // 右栏概要跟随切换
   if (currentView !== 'chat') switchView(currentView);  // 保持当前视图/报表页签，按新月份重查

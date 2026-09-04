@@ -8,8 +8,9 @@ from app.ledger.account_service import get_account, seed_accounts
 from app.ledger.balances import fmt_amount
 from app.ledger.exceptions import BookError
 from app.ledger.report_templates import seed_report_templates
-from app.models.book import Book
+from app.models.book import Book, UserBook
 from app.models.report import OpeningBalance
+from app.models.user import User
 from app.models.voucher import Voucher
 
 TWO_PLACES = Decimal("0.01")
@@ -17,6 +18,43 @@ PERIOD_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 TAXPAYER_TYPES = {"small_scale", "general"}
 ENTITY_TYPES = {"company", "individual", "partnership"}
 POSTED_STATUSES = ("posted", "voided")
+BOOK_ROLES = ("admin", "bookkeeper", "auditor")
+
+
+def add_member(db: Session, *, user_id: int, book_id: int, role: str = "bookkeeper") -> UserBook:
+    """挂用户为账套成员（幂等：已存在则更新角色）。"""
+    if role not in BOOK_ROLES:
+        raise BookError("账套角色不合法")
+    membership = db.scalar(
+        select(UserBook).where(UserBook.user_id == user_id, UserBook.book_id == book_id)
+    )
+    if membership is None:
+        membership = UserBook(user_id=user_id, book_id=book_id, role=role)
+        db.add(membership)
+    else:
+        membership.role = role
+    db.commit()
+    return membership
+
+
+def user_can_access(db: Session, user: User, book_id: int) -> bool:
+    """账套访问判定：全局 admin 天然可见全部；其他用户须为账套成员。"""
+    if user.role == "admin":
+        return True
+    found = db.scalar(
+        select(UserBook.id).where(UserBook.user_id == user.id, UserBook.book_id == book_id)
+    )
+    return found is not None
+
+
+def visible_books(db: Session, user: User) -> list[Book]:
+    """当前用户可见账套：全局 admin 全部；其他用户为被授权成员的账套。"""
+    if user.role == "admin":
+        return list(db.scalars(select(Book).order_by(Book.id)).all())
+    rows = db.execute(
+        select(Book).join(UserBook, UserBook.book_id == Book.id).where(UserBook.user_id == user.id).order_by(Book.id)
+    ).scalars().all()
+    return list(rows)
 
 
 def create_book(

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, require_admin
+from app.api.deps import get_current_user, require_admin, require_book_access
 from app.core.database import get_db
 from app.ledger import account_service, aux_service, book_service
 from app.ledger.ai.packs import TAGS
@@ -17,11 +17,20 @@ from app.schemas.report import OpeningSetIn
 router = APIRouter(prefix="/api", tags=["books"])
 
 
+@router.get("/books", response_model=list[BookOut])
+def list_books(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """当前用户可见账套列表：全局 admin 全部；其他用户为被授权成员的账套。"""
+    return book_service.visible_books(db, user)
+
+
 @router.post("/books", response_model=BookOut, status_code=201)
 def create_book(
     body: BookCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     try:
         book = book_service.create_book(
@@ -34,6 +43,8 @@ def create_book(
         )
     except LedgerError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    # 创建者自动成为该账套 admin 成员
+    book_service.add_member(db, user_id=user.id, book_id=book.id, role="admin")
     return book
 
 
@@ -41,7 +52,7 @@ def create_book(
 def get_book(
     book_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_book_access),
 ):
     book = db.get(Book, book_id)
     if book is None:
@@ -53,7 +64,7 @@ def get_book(
 def get_opening(
     book_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_book_access),
 ):
     from sqlalchemy import select
 
@@ -91,7 +102,7 @@ def set_opening(
 def get_ai_style(
     book_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_book_access),
 ):
     if db.get(Book, book_id) is None:
         raise HTTPException(status_code=404, detail="账套不存在")
@@ -149,7 +160,7 @@ def account_tree(
     book_id: int,
     only_active: bool = True,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_book_access),
 ):
     if db.get(Book, book_id) is None:
         raise HTTPException(status_code=404, detail="账套不存在")

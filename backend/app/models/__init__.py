@@ -1,7 +1,7 @@
 from app.models.account import Account
 from app.models.ai import AIDoc, AiStyleSetting
 from app.models.attachment import Attachment
-from app.models.book import Book
+from app.models.book import Book, UserBook
 from app.models.contact import Contact
 from app.models.llm import LLMProvider
 from app.models.report import OpeningBalance, PeriodBalance, PeriodClose, ReportTemplate
@@ -12,6 +12,7 @@ from app.models.voucher import Voucher, VoucherLine
 __all__ = [
     "Account",
     "Book",
+    "UserBook",
     "User",
     "Voucher",
     "VoucherLine",

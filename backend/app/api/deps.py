@@ -42,3 +42,16 @@ def require_auditor_or_admin(user: User = Depends(get_current_user)) -> User:
             status_code=status.HTTP_403_FORBIDDEN, detail="需要审核或管理员权限"
         )
     return user
+
+
+def require_book_access(
+    book_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> User:
+    """账套访问门槛：全局 admin 或账套成员放行，否则 403（多租户隔离钩子）。"""
+    from app.ledger import book_service
+
+    if not book_service.user_can_access(db, user, book_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该账套")
+    return user
