@@ -28,7 +28,9 @@
 ### 2.1b 账套与多租户
 - 账套成员制 `user_book`（user×book×role）：全局 admin 天然可见全部账套；其他用户须为账套成员（可见性/访问均按此判定）。
 - 建账套自动给创建者挂 admin 成员；前端切换账套必须清空 chatLog + 按账套记忆期间（防跨账套串上下文）。
-- 新增涉及 book_id 的路由时，写操作走 `require_admin`、读操作挂 `require_book_access`（P2 前存量业务路由未全量挂，开放前必须补齐）。
+- 新增涉及 book_id 的路由时，写操作走 `require_admin`、读操作挂 `require_book_access`（**存量业务路由已于 2026-09-05 全量挂**）。单实体端点（凭证/附件/文档）先查实体归属账套再校验；body.book_id 端点在函数体内显式调 `require_book_access`。
+- 成员管理：成员端点仅 admin；整体替换须过「最低可管性」校验（账套不得无管理员）；删用户级联清理授权。
+- 心智模型：全局角色=岗位（admin/bookkeeper/auditor，制审强制分离），账套成员=门禁（能进哪些账套）。
 
 ### 2.2 凭证与落账
 - **AI 无任何过账/审核权限**：只能生成「候选凭证」，最终落账必须经用户在卡片上点击「确认入账」（工具白名单仅查询类 + ask_user）。
@@ -111,6 +113,7 @@
 | `backend/app/ledger/cashflow.py` | 现金流量表 _flows（行级标注优先、未标注兜底推断）+ CASH_ACCOUNTS/INFLOW_MAP/OUTFLOW_MAP/ITEM_LABELS |
 | `backend/app/ledger/report_service.py` | period_summary / template_check / PUT template-row / POST template-reset + 表结法默认模板 |
 | `backend/app/ledger/check_service.py` | 勾稽关系校验（方向异常/利润·现金勾稽/跨期衔接快照对比）+ run_checks 聚合 |
+| `backend/app/ledger/book_service.py` | 账套创建（预置科目/模板/税务参数）+ 成员管理（book_members/set_book_members/user_books/set_user_books + 最低可管性校验） |
 | `backend/app/models/voucher.py` | Voucher / VoucherLine ORM，含 cf_item 列 |
 | `backend/app/schemas/voucher.py` | Voucher/VoucherLine 输入输出 Schema，含 cf_item |
 | `backend/app/api/` | 13 路由：auth/vouchers/accounts/reports/tax/invoices/ai/attachments/contacts/books/settings/period-end/cashflow |
