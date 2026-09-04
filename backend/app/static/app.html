@@ -1010,27 +1010,42 @@ async function saveAiStyle() {
 }
 
 /* ---------- 科目余额表（完整树形） ---------- */
+let TB_UNPOSTED = 'none'; // 科目余额表未过账口径：none 仅已过账 / pending 含待审+已审 / all 含草稿
+
 async function renderTB() {
   $('mainArea').innerHTML = `<h3 class="view-title" style="display:flex;align-items:center;gap:.7rem;flex-wrap:wrap">📊 科目余额表
     <input type="month" id="r_period" value="${PERIOD}" onchange="reportPeriodChanged(this.value)"
       style="font-weight:400;padding:.15rem .4rem;border:1px solid var(--rule);border-radius:6px;font-size:.95rem">
+    <select id="tb_unposted" onchange="TB_UNPOSTED=this.value; renderTB()"
+      style="font-weight:400;padding:.15rem .4rem;border:1px solid var(--rule);border-radius:6px;font-size:.95rem">
+      <option value="none">仅已过账</option>
+      <option value="pending">含未过账（待审+已审）</option>
+      <option value="all">含草稿</option>
+    </select>
   </h3><div id="t_body">加载中…</div>`;
+  const unposted = TB_UNPOSTED;
+  $('tb_unposted').value = unposted;
+  const showU = unposted !== 'none';
   try {
-    const r = await api(`/api/reports/trial-balance?book_id=${BOOK.id}&period=${PERIOD}&complete=true`);
+    const r = await api(`/api/reports/trial-balance?book_id=${BOOK.id}&period=${PERIOD}&complete=true&unposted=${unposted}`);
     const rows = r.rows;
     const body = rows.map(row => {
       const isRollup = !!row.is_rollup;
       const name = `${row.account_code} ${row.account_name}${row.has_aux ? ' <a class="link" onclick="renderAuxBalance(\'' + row.account_code + '\')">往来</a>' : ''}`;
+      const ucols = showU ? `<td class="num" style="color:var(--muted)">${row.unposted_debit}</td><td class="num" style="color:var(--muted)">${row.unposted_credit}</td>` : '';
       return `<tr class="${isRollup ? 'rollup-row' : ''}" style="${row.is_active ? '' : 'opacity:.5'}">
         <td style="${isRollup ? '' : 'padding-left:1.4rem'}">${isRollup ? '▾ ' : ''}${name}</td>
         <td class="num">${row.opening_debit}</td><td class="num">${row.opening_credit}</td>
         <td class="num">${row.period_debit}</td><td class="num">${row.period_credit}</td>
-        <td class="num">${row.closing_debit}</td><td class="num">${row.closing_credit}</td></tr>`;
+        <td class="num">${row.closing_debit}</td><td class="num">${row.closing_credit}</td>${ucols}</tr>`;
     }).join('');
+    const uhead = showU ? '<th class="num">未过账借</th><th class="num">未过账贷</th>' : '';
+    const utotal = showU ? `<td class="num">${r.totals.unposted_debit}</td><td class="num">${r.totals.unposted_credit}</td>` : '';
+    const warn = unposted === 'all' ? '<div class="result" style="margin-top:.5rem;color:var(--danger)">⚠️ 当前含草稿：草稿可能借贷不平、科目未填全，未过账列为参考值，不影响已过账三栏与平衡校验。</div>' : '';
     $('t_body').innerHTML = `<div class="badge">${r.is_balanced ? '✅ 三栏平衡' : '❌ 不平衡'}</div>
-      <table><tr><th>科目</th><th class="num">期初借</th><th class="num">期初贷</th><th class="num">发生借</th><th class="num">发生贷</th><th class="num">期末借</th><th class="num">期末贷</th></tr>${body}
-      <tr class="total-row"><td>合计</td><td class="num">${r.totals.opening_debit}</td><td class="num">${r.totals.opening_credit}</td><td class="num">${r.totals.period_debit}</td><td class="num">${r.totals.period_credit}</td><td class="num">${r.totals.closing_debit}</td><td class="num">${r.totals.closing_credit}</td></tr></table>
-      <div class="result" style="margin-top:.5rem">含一级科目汇总行（灰底）；标「往来」的科目可点击查看按客户/供应商的辅助余额。</div>`;
+      <table><tr><th>科目</th><th class="num">期初借</th><th class="num">期初贷</th><th class="num">发生借</th><th class="num">发生贷</th><th class="num">期末借</th><th class="num">期末贷</th>${uhead}</tr>${body}
+      <tr class="total-row"><td>合计</td><td class="num">${r.totals.opening_debit}</td><td class="num">${r.totals.opening_credit}</td><td class="num">${r.totals.period_debit}</td><td class="num">${r.totals.period_credit}</td><td class="num">${r.totals.closing_debit}</td><td class="num">${r.totals.closing_credit}</td>${utotal}</tr></table>
+      ${warn}<div class="result" style="margin-top:.5rem">含一级科目汇总行（灰底）；标「往来」的科目可点击查看按客户/供应商的辅助余额。${showU ? '未过账金额为独立列，不计入已过账三栏。' : ''}</div>`;
   } catch (e) { $('t_body').innerHTML = `<div class="result" style="color:var(--danger)">加载失败：${e.message}</div>`; }
 }
 

@@ -15,10 +15,11 @@ def get_trial_balance(
     book_id: int,
     period: str,
     complete: bool = False,
+    unposted: str | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return balances.trial_balance(db, book_id=book_id, period=period, complete=complete)
+    return balances.trial_balance(db, book_id=book_id, period=period, complete=complete, unposted=unposted)
 
 
 @router.get("/aux-balance")

@@ -13,6 +13,9 @@ from app.models.voucher import Voucher, VoucherLine
 TWO_PLACES = Decimal("0.01")
 ZERO = Decimal("0.00")
 POSTED_STATUSES = ("posted", "voided")
+# 未过账（未入账）的凭证状态——供「含未过账」开关使用
+UNPOSTED_PENDING = ("submitted", "audited")  # 已提交待过账（已审/待审）
+UNPOSTED_ALL = ("draft", "submitted", "audited")  # 全含草稿
 
 
 def fmt_amount(value: Decimal) -> str:
@@ -60,6 +63,7 @@ def gross_sums(
     period_to: str | None = None,
     *,
     exclude_pnl_carryover: bool = False,
+    statuses: tuple[str, ...] = POSTED_STATUSES,
 ) -> dict[str, list[Decimal]]:
     stmt = (
         select(VoucherLine.account_code, VoucherLine.debit, VoucherLine.credit)
@@ -67,7 +71,7 @@ def gross_sums(
         .where(
             Voucher.book_id == book_id,
             Voucher.period >= period_from,
-            Voucher.status.in_(POSTED_STATUSES),
+            Voucher.status.in_(statuses),
         )
     )
     if period_to:
@@ -137,12 +141,24 @@ def _interleave(parent_rows: list[dict], leaf_rows: list[dict]) -> list[dict]:
     return result
 
 
-def trial_balance(db: Session, *, book_id: int, period: str, complete: bool = False) -> dict:
+def trial_balance(db: Session, *, book_id: int, period: str, complete: bool = False, unposted: str | None = None) -> dict:
     from app.models.book import Book
 
     book = db.get(Book, book_id)
     opening = opening_nets(db, book_id, before_period=period)
     sums = gross_sums(db, book_id, period, period)
+
+    # 未过账发生额（独立列展示，不并入账上三栏）：None 不算；pending=待审+已审；all=再含草稿
+    unposted_statuses: tuple[str, ...] | None = None
+    if unposted == "pending":
+        unposted_statuses = UNPOSTED_PENDING
+    elif unposted == "all":
+        unposted_statuses = UNPOSTED_ALL
+    unposted_sums = (
+        gross_sums(db, book_id, period, period, statuses=unposted_statuses)
+        if unposted_statuses
+        else {}
+    )
 
     opening_rollup = {code: ZERO for code in sums}
     for code, net in opening.items():
@@ -156,6 +172,7 @@ def trial_balance(db: Session, *, book_id: int, period: str, complete: bool = Fa
         p_dr, p_cr = sums.get(account.code, [ZERO, ZERO])
         c_net = o_net + p_dr - p_cr
         c_dr, c_cr = _split(c_net)
+        u_dr, u_cr = unposted_sums.get(account.code, [ZERO, ZERO])
         return {
             "account_code": account.code,
             "account_name": account.name,
@@ -170,6 +187,8 @@ def trial_balance(db: Session, *, book_id: int, period: str, complete: bool = Fa
             "period_credit": fmt_amount(p_cr),
             "closing_debit": fmt_amount(c_dr),
             "closing_credit": fmt_amount(c_cr),
+            "unposted_debit": fmt_amount(u_dr),
+            "unposted_credit": fmt_amount(u_cr),
         }
 
     rows = [leaf_row(account) for account in leaves]
@@ -179,6 +198,7 @@ def trial_balance(db: Session, *, book_id: int, period: str, complete: bool = Fa
         for account in leaves:
             leaf_opening[account.code] = opening.get(account.code, ZERO)
         merged_sums = _with_parent_rollups_gross(db, book_id, sums)
+        merged_unposted = _with_parent_rollups_gross(db, book_id, unposted_sums)
         merged_opening: dict[str, Decimal] = dict(leaf_opening)
         for leaf in leaves:
             prefix = leaf.code[:4]
@@ -196,6 +216,7 @@ def trial_balance(db: Session, *, book_id: int, period: str, complete: bool = Fa
             p_dr, p_cr = merged_sums.get(account.code, [ZERO, ZERO])
             c_net = o_net + p_dr - p_cr
             c_dr, c_cr = _split(c_net)
+            u_dr, u_cr = merged_unposted.get(account.code, [ZERO, ZERO])
             parent_rows.append(
                 {
                     "account_code": account.code,
@@ -212,6 +233,8 @@ def trial_balance(db: Session, *, book_id: int, period: str, complete: bool = Fa
                     "period_credit": fmt_amount(p_cr),
                     "closing_debit": fmt_amount(c_dr),
                     "closing_credit": fmt_amount(c_cr),
+                    "unposted_debit": fmt_amount(u_dr),
+                    "unposted_credit": fmt_amount(u_cr),
                 }
             )
         rows = _interleave(parent_rows, rows)
@@ -220,6 +243,7 @@ def trial_balance(db: Session, *, book_id: int, period: str, complete: bool = Fa
         "opening_debit": ZERO, "opening_credit": ZERO,
         "period_debit": ZERO, "period_credit": ZERO,
         "closing_debit": ZERO, "closing_credit": ZERO,
+        "unposted_debit": ZERO, "unposted_credit": ZERO,
     }
     for row in rows:
         if row.get("is_rollup"):
@@ -230,6 +254,8 @@ def trial_balance(db: Session, *, book_id: int, period: str, complete: bool = Fa
         totals["period_credit"] += Decimal(row["period_credit"])
         totals["closing_debit"] += Decimal(row["closing_debit"])
         totals["closing_credit"] += Decimal(row["closing_credit"])
+        totals["unposted_debit"] += Decimal(row["unposted_debit"])
+        totals["unposted_credit"] += Decimal(row["unposted_credit"])
     formatted_totals = {key: fmt_amount(value) for key, value in totals.items()}
     is_balanced = (
         totals["opening_debit"] == totals["opening_credit"]
@@ -243,6 +269,7 @@ def trial_balance(db: Session, *, book_id: int, period: str, complete: bool = Fa
         "rows": rows,
         "totals": formatted_totals,
         "is_balanced": is_balanced,
+        "unposted": unposted or "none",
     }
 
 
