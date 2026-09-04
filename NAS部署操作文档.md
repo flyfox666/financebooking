@@ -1,6 +1,7 @@
 # 有数 LedgerAI · NAS 部署操作文档
 
-> 适用版本：v0.3-m4 及以上（已含 Alembic 自动迁移、每日自动备份）
+> 适用版本：当前 main 分支（M1–M6 全量功能：AI 记账 / 勾稽校验 / 报表引擎 / 税务）
+> 日常使用入口：主界面 `http://NAS内网IP:8000/app`（接口调试页 /docs 仅开发用）
 > 部署架构：单后端容器 + NAS 数据卷（SQLite 数据库 / 电子附件 / 自动备份）
 > 适用 NAS：群晖 / 威联通 / 极空间 / 绿联等支持 Docker（Container Manager）的 x86_64 机型
 
@@ -103,17 +104,27 @@ docker compose exec backend python scripts/init_dev_db.py \
 
 脚本会自动：建表（Alembic 迁移已在启动时执行）→ 创建管理员 → 建账套并预置 66 个会计科目与报表模板、税务参数。
 
-### 第 5 步：验证
+### 第 5 步：配置模型服务（使用 AI 记账才需要）
+
+登录主界面 → 右上角齿轮「设置」→ 添加 provider（OpenAI 兼容 / 火山 / 通义等），
+填入 API Key 后点「测试连通」→ 设为默认。**密钥加密存储在数据库**，不落 .env、不进代码仓库。
+
+> `.env` 中的 `LLM_API_KEY` 等变量是可选的「首次启动种子」：容器第一次启动且库中无 provider 时
+> 会自动导入一条；日常增删改一律在设置页操作。
+
+### 第 6 步：验证
 
 浏览器访问：
 
 ```text
-http://NAS内网IP:8000/docs        ← 接口调试页（测试用页面）
+http://NAS内网IP:8000/app         ← 主界面（日常使用入口，admin 登录）
+http://NAS内网IP:8000/docs        ← 接口调试页（仅开发/测试用）
 ```
 
-用 admin 登录后可依次验证：`GET /api/health`、`GET /api/accounts`（应见 66 科目）、`GET /api/reports/trial-balance`。
+主界面登录后依次验证：右侧「本期概要」有数据、凭证/报表/发票三个 Tab 正常打开；
+如需 AI 记账，先到右上角「设置」页添加 LLM provider（见下节）。
 
-### 第 6 步：确认数据落在 NAS 上
+### 第 7 步：确认数据落在 NAS 上
 
 检查 `/volume1/docker/ledger/data/` 目录出现：
 
@@ -198,6 +209,7 @@ docker compose exec backend python scripts/restore_check.py data/backups/ledger-
 | NAS 上构建失败 | 确认 NAS Docker 版本支持 Compose v2（`docker compose version`）；老版套件用 Container Manager 图形界面导入 |
 | 登录 401 且密钥换过 | SECRET_KEY 变更会导致旧令牌失效，重新登录即可 |
 | 数据库锁死 (database is locked) | SQLite 单写者，正常使用不会出现；若出现多为两个进程直写同一文件，确认只有容器在访问 data 目录 |
+| AI 记账报模型错误 / 无响应 | 主界面「设置」页点 provider 的「测试连通」；多为 Key 失效、余额不足或 base_url 错；勾稽/报表功能不依赖 LLM，不受影响 |
 
 ---
 
@@ -206,7 +218,8 @@ docker compose exec backend python scripts/restore_check.py data/backups/ledger-
 1. **默认只走局域网**：不要在路由器上把 8000 端口映射到公网；
 2. **外网访问需求**：推荐 Tailscale / WireGuard 组网（点对点加密、不开端口），或 NAS 自带反向代理 + HTTPS + 强密码；
 3. **账号**：首次初始化后立即改掉默认密码；制单（bookkeeper）与审核（auditor）使用不同账号，系统强制制审分离；
-4. **密钥**：大模型/OCR 的 API Key（M6 起使用）一律放 `.env`，不进代码仓库；
+4. **密钥**：模型服务 API Key 在主界面「设置」页配置（加密存数据库）；`.env` 不进代码仓库，
+   其中的 `LLM_*` 变量仅作首启种子，长期不用的可删；
 5. **第二重备份**：NAS 自带快照或云同步 `/volume1/docker/ledger/data`，防止 NAS 盘故障。
 
 ---
@@ -223,4 +236,4 @@ docker compose exec backend python scripts/restore_check.py data/backups/ledger-
 
 ---
 
-*文档版本：v1.0（随 v0.3-m4）· 更新方式：修改后随代码一起提交*
+*文档版本：v1.1（2026-09-04，同步 AI 记账/设置页密钥/主界面入口）· 更新方式：修改后随代码一起提交*

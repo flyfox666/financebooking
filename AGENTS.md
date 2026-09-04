@@ -36,6 +36,7 @@
 - **表结法**：资产负债表「未分配利润」行公式 = `3103(实收资本? 不—— 3101实收 /3103利润分配 + 3104本年利润 + 全部损益类科目净额 14 项)`，确保期中/期末恒等式 Assets=Liabilities+Equity 始终成立；期末结转后损益归零，公式仍正确。
 - **现金流量行级标注优先**：`voucher_line.cf_item` 为 14 项 key（见 cashflow.py ITEM_LABELS）。一张凭证若含多行现金可分别标注不同流量项。`cashflow._flows` 先累计所有已标注净量 → 剩余未标注走「对方最大行科目 × 方向」做兜底推断。
 - `ReportTemplate` 按账套隔离 seed 默认模板；映射体检必须实时校验恒等式 + 列出未映射叶子科目（有余额的标红）。
+- **勾稽校验（check_service）**：方向/余额异常（资产贷方、负债借方、货币资金赤字）、未分配利润↔净利润、货币资金↔现金流、跨期衔接（**对比 PeriodBalance 结账快照**，非现算值——现算两边同源恒等是失效校验）；上期未结账明确标注跳过。
 
 ### 2.4 凭证显示
 - 凭证详情/编辑页**科目编码与科目名称分两列**（编码列等宽字体左对齐）。
@@ -104,6 +105,7 @@
 | `backend/app/ledger/voucher_service.py` | 凭证创建/校验 + _apply_cf_items 兜底 + source=manual 附件校验 |
 | `backend/app/ledger/cashflow.py` | 现金流量表 _flows（行级标注优先、未标注兜底推断）+ CASH_ACCOUNTS/INFLOW_MAP/OUTFLOW_MAP/ITEM_LABELS |
 | `backend/app/ledger/report_service.py` | period_summary / template_check / PUT template-row / POST template-reset + 表结法默认模板 |
+| `backend/app/ledger/check_service.py` | 勾稽关系校验（方向异常/利润·现金勾稽/跨期衔接快照对比）+ run_checks 聚合 |
 | `backend/app/models/voucher.py` | Voucher / VoucherLine ORM，含 cf_item 列 |
 | `backend/app/schemas/voucher.py` | Voucher/VoucherLine 输入输出 Schema，含 cf_item |
 | `backend/app/api/` | 13 路由：auth/vouchers/accounts/reports/tax/invoices/ai/attachments/contacts/books/settings/period-end/cashflow |
@@ -117,7 +119,7 @@
 
 ## 七、当前待办清单（优先级 高→低）
 
-1. **架构图同步**：`项目架构图.svg` 尚未反映近月大改动（本期概要、重复检测、发票模块、映射体检、现金流量行级、响应式/缩放），需重绘。
+1. ~~**架构图同步**~~ ✅（2026-09-04 已同步）：更新为 AI 助手主视图、勾稽校验 check_service、行业偏好库 packs、设置页 LLM 配置。
 2. ~~**可选：check_duplicate 摘要相似度**~~ ✅（2026-09-04 已用更实质的方案解决）：查重口径已收紧为实质性重复——发票号精确命中已入账发票，或同日+同金额+科目类别一致+往来对象不冲突；仅金额相同不拦（重复金额是正常业务）。摘要相似度辅信号不再需要。
 3. **可选：AI voucher_date 优先开票日期**：提示词已约束未说明时用今天，说明开票日期时应优先。模型偶有不听话，当前可手动改卡片日期，可加硬兜底从历史/发票 fields 提取。
 4. **可选：小规模进项拆税回归补测**：目前已回归 1 场（2825 元 13% 专票固定资产），可补 2-3 场（差旅/住宿/打印等常见费用场景）。
