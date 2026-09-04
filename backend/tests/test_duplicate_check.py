@@ -1,4 +1,4 @@
-"""G2 重复检测护栏：_hard_check_duplicate 硬兜底 + check_duplicate 工具的「仅已入账算重」。"""
+"""G2 重复检测护栏：实质性重复导向——发票号金标准 + 同日同金额同科目同往来才算疑似。"""
 
 import json
 from datetime import date
@@ -14,11 +14,14 @@ from app.ledger.ai.agent import (
 from app.models.tax import Invoice
 
 
-def _posted_voucher(db_session, book, mama_user, auditor_user, post_flow, total="100.00", vdate="2026-08-01"):
+def _posted_voucher(
+    db_session, book, mama_user, auditor_user, post_flow,
+    total="100.00", vdate="2026-08-01", account="5602", contact_id=None,
+):
     voucher = voucher_service.create_voucher(
         db_session, book_id=book.id, voucher_date=vdate, attachment_count=1,
         lines=[
-            {"summary": "测试费用", "account_code": "5602", "debit": total, "credit": "0"},
+            {"summary": "测试费用", "account_code": account, "debit": total, "credit": "0", "contact_id": contact_id},
             {"summary": "银行付款", "account_code": "1002", "debit": "0", "credit": total},
         ],
         operator_id=mama_user.id,
@@ -27,32 +30,66 @@ def _posted_voucher(db_session, book, mama_user, auditor_user, post_flow, total=
     return voucher
 
 
-def _candidate(total="100.00", vdate="2026-08-10"):
+def _candidate(total="100.00", vdate="2026-08-01", account="5602", contact_id=None):
     return {
         "voucher_date": vdate,
         "lines": [
-            {"summary": "测试费用", "account_code": "5602", "debit": total, "credit": "0"},
+            {"summary": "测试费用", "account_code": account, "debit": total, "credit": "0", "contact_id": contact_id},
             {"summary": "银行付款", "account_code": "1002", "debit": "0", "credit": total},
         ],
     }
 
 
 def test_hard_check_duplicate_hit(db_session, book, mama_user, auditor_user, post_flow):
-    """相同金额 + 30 天窗口内已有凭证 → 返回含警告标记与凭证号的警告文本。"""
+    """同日 + 同金额 + 同科目（同笔单据二次录入的特征）→ 返回含警告标记与凭证号的警告文本。"""
     _posted_voucher(db_session, book, mama_user, auditor_user, post_flow, vdate="2026-08-01")
-    warning = _hard_check_duplicate(db_session, book.id, _candidate(vdate="2026-08-10"))
+    warning = _hard_check_duplicate(db_session, book.id, _candidate(vdate="2026-08-01"))
     assert warning is not None
     assert DUP_WARN_MARK in warning
     assert "记字第" in warning
 
 
-def test_hard_check_duplicate_no_hit(db_session, book, mama_user, auditor_user, post_flow):
-    """金额不同或超出 30 天窗口 → 放行（None），不误伤。"""
+def test_hard_check_duplicate_amount_only_not_hit(db_session, book, mama_user, auditor_user, post_flow):
+    """仅金额相同不算重复（重复金额是正常业务）：不同日期 / 不同科目 / 不同往来 / 金额不同 → 放行。"""
     _posted_voucher(db_session, book, mama_user, auditor_user, post_flow, vdate="2026-08-01")
     # 金额不同
     assert _hard_check_duplicate(db_session, book.id, _candidate(total="999.00")) is None
-    # 日期超出 ±30 天窗口
+    # 同金额但不同日期（如月度房租：每月同额同科目，日期不同是正常业务）
+    assert _hard_check_duplicate(db_session, book.id, _candidate(vdate="2026-08-10")) is None
     assert _hard_check_duplicate(db_session, book.id, _candidate(vdate="2026-12-01")) is None
+    # 同金额同日但科目类别不同（同为 100 元，一个是费用一个是资产）
+    assert _hard_check_duplicate(db_session, book.id, _candidate(account="1601")) is None
+
+
+def test_hard_check_duplicate_diff_contacts_not_hit(
+    db_session, book, mama_user, auditor_user, post_flow, contacts_pair
+):
+    """同日同金额同科目但往来对象不同（同一科目向两家供应商各付 100）→ 放行。"""
+    _posted_voucher(
+        db_session, book, mama_user, auditor_user, post_flow,
+        vdate="2026-08-01", contact_id=contacts_pair["customer"].id,
+    )
+    warning = _hard_check_duplicate(
+        db_session, book.id,
+        _candidate(vdate="2026-08-01", contact_id=contacts_pair["supplier"].id),
+    )
+    assert warning is None
+
+
+def test_hard_check_duplicate_same_contacts_hit(
+    db_session, book, mama_user, auditor_user, post_flow, contacts_pair
+):
+    """同日同金额同科目且往来对象一致（同一单据二次上传）→ 命中。"""
+    _posted_voucher(
+        db_session, book, mama_user, auditor_user, post_flow,
+        vdate="2026-08-01", contact_id=contacts_pair["customer"].id,
+    )
+    warning = _hard_check_duplicate(
+        db_session, book.id,
+        _candidate(vdate="2026-08-01", contact_id=contacts_pair["customer"].id),
+    )
+    assert warning is not None
+    assert DUP_WARN_MARK in warning
 
 
 def test_dup_invoice_only_counts_posted(db_session, book, mama_user, auditor_user, post_flow):
