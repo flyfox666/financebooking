@@ -37,14 +37,46 @@ def test_profit_and_cash_reconciliation_ok(db_session, mock_month, book):
     assert cash["ok"] is True
 
 
-def test_period_continuity_first_and_next(db_session, mock_month, book):
-    """启用首期跳过；次期期初应等于上期期末。"""
+def test_period_continuity_first_and_unclosed(db_session, mock_month, book):
+    """启用首期跳过；上期未结账（无快照）明确标注跳过（快照语义）。"""
     first = check_service.period_continuity(db_session, book_id=book.id, period="2026-08")
     assert first["ok"] is True
     assert first["note"] == "启用首期，无上期可比"
 
     nextp = check_service.period_continuity(db_session, book_id=book.id, period="2026-09")
     assert nextp["ok"] is True
+    assert "未结账" in nextp["note"]
+
+
+def test_period_continuity_snapshot_catches_tamper(db_session, mock_month, book, mama_user):
+    """结账后篡改期初 → 跨期校验应 ❌（对比基准是结账快照而非现算值）；恢复后 ✅。"""
+    from decimal import Decimal
+
+    from app.ledger import close_service
+    from app.models.report import OpeningBalance
+
+    close_service.close_period(db_session, book_id=book.id, period="2026-08", operator_id=mama_user.id)
+
+    # 结账后篡改 1002 期初
+    ob = db_session.query(OpeningBalance).filter(
+        OpeningBalance.book_id == book.id, OpeningBalance.account_code == "1002"
+    ).first()
+    if ob is None:
+        ob = OpeningBalance(book_id=book.id, account_code="1002", debit=Decimal("0"), credit=Decimal("0"))
+        db_session.add(ob)
+    orig_d = ob.debit
+    ob.debit = Decimal(str(ob.debit)) + Decimal("777")
+    db_session.commit()
+
+    result = check_service.period_continuity(db_session, book_id=book.id, period="2026-09")
+    hit = [i for i in result["issues"] if i["code"] == "1002"]
+    assert hit, "期初被篡改应被抓到"
+    assert result["ok"] is False
+
+    # 恢复 → ✅
+    ob.debit = orig_d
+    db_session.commit()
+    assert check_service.period_continuity(db_session, book_id=book.id, period="2026-09")["ok"] is True
 
 
 def test_run_checks_aggregates(db_session, mock_month, book):
