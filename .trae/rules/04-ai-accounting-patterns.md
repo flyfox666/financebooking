@@ -20,7 +20,7 @@ description: 当对话涉及 AI 记账智能体、凭证候选生成、发票解
 | 场景 | 判定条件 | 问法示例 |
 |---|---|---|
 | 购方不匹配 | PDF 购方名/税号 ≠ 账套公司 | 「该发票购方为「戴德梁行…」与账套「…」不一致，是否仍按本企业收票登记进项？」 |
-| 疑似重复入账 | check_duplicate 命中（发票号已入账同方向 / 金额±30 天窗口高度相似） | 「检测到 X 月 X 日已有 ¥N 的同类业务（发票号 XXX），是否为重复录入？继续 / 取消」 |
+| 疑似重复入账 | check_duplicate 命中（发票号已入账；或同日+同金额+科目类别一致+往来不冲突——同一单据二次录入特征） | 「检测到 X 月 X 日已有 ¥N 的同科目同往来业务（凭证号 XXX），是否为同一单据重复录入？继续 / 取消」 |
 | 新建往来单位 | find_or_create_contact 返回"未找到，要新建吗"分支 | 「供应商「XXX」在台账中未找到，是否新建？地址/税号=…」 |
 | AI 没填开票日期 / 用了今天 | 用户描述里给出了开票日期但 voucher_date != 该日期 | 「本次开票日期为 2026-08-15，是否使用该日期而非今天？」 |
 
@@ -31,7 +31,7 @@ Prompt + 用户确认都挡不住的模型犯错，靠代码层在数据落库�
 
 | 兜底函数 | 位置 | 修正逻辑 |
 |---|---|---|
-| `_hard_check_duplicate` | agent.py / suggest.py create → _finalize 前 | 发票号精确匹配（已入账 only）+ 金额±30 天；命中→改写 ask_user，不生成凭证卡片 |
+| `_hard_check_duplicate` | agent.py（run_agent 凭证返回前） | 发票号精确匹配（已入账 only）+ 实质性重复（同日+同金额+科目类别含前缀+往来不冲突）；命中→改写 ask_user，不生成凭证卡片。仅金额相同不拦 |
 | `_apply_cf_items` | voucher_service.prepare 后 | ①非现金行清 cf_item→None ②合法 key 保留 ③缺/非法→对方最大行科目×方向查 INFLOW/OUTFLOW MAP |
 | `_sanitize_contacts` | voucher_service.create_voucher 入参 lines | 逐行查 Contact 表，无效 ID（数据库不存在 / 类型不匹配行方向）→ force None，卡片里让用户补 |
 | `_tax_rule` 动态注入 | agent.run_agent 开头 + suggest | 不再写死小规模口径，按 book.taxpayer_type 分 3 档返回文本注入 system prompt |
