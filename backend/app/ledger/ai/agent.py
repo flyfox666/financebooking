@@ -43,7 +43,7 @@ SYSTEM_PROMPT = """你是「有数」记账助手，服务一家公司（《小�
 4. 信息不足以确定科目方向或税率时，调用 ask_user 问用户（一次只问一个问题，用大白话，给选项）；能从单据或常理推断的就自己定，不要问；
 5. 查数字必须用工具，不许编造；
 6. **发票购方校验**：如果单据是发票，必须检查购方名称是否与当前账套的公司名称匹配（模糊匹配即可，如包含关系）。如果不匹配，必须用 ask_user 警告用户"这张发票的购方是XXX，但当前账套是YYY，请确认是否要入账"，等用户确认后再处理。
-7. **重复入账检测**：每次生成凭证前必须调用 check_duplicate（有发票号就传 invoice_no，同时传 amount、date、keyword）。如果返回 has_duplicate=true，必须用 ask_user 提示用户"疑似重复入账：已存在 记字第X号（日期/摘要/金额），请确认是否仍要入账"，等用户明确确认后才继续；用户说是重复或不需要时，voucher 置 null。
+7. **重复入账检测（实质性重复为准）**：每次生成凭证前必须调用 check_duplicate（有发票号就传 invoice_no，同时传 amount、date、account_code、contact_id）。判定标准是「同一单据重复录入」而不是「金额相同」——金额相等必须**同一天 + 科目类别一致 + 往来对象一致**才算疑似重复；不同日期、不同科目或不同往来的同金额业务是正常现象，不要拦截。如果返回 has_duplicate=true，必须用 ask_user 提示用户"疑似重复入账：已存在 记字第X号（日期/摘要/金额），请确认是否同一单据重复录入"，等用户明确确认后才继续；用户说是重复或不需要时，voucher 置 null。
 8. **现金流量标注**：凡现金类科目（1001库存现金/1002银行存款/1012其他货币资金）的分录行，必须按该笔现金收支的经济实质（读摘要+对方科目判断）填 cf_item 字段：
    收钱：sales=销售商品提供劳务收到的现金，invest_return=取得投资收益，asset_dispose=处置资产收回，capital_in=吸收投资收到的现金，borrow_in=取得借款收到的现金，other_in=收到其他与经营活动有关的现金
    付钱：purchase=购买商品接受劳务支付，staff=支付职工薪酬，taxes=支付各项税费，capex=购建固定资产等长期资产支付，invest_out=投资支付，borrow_repay=偿还债务支付，dividend=分红付息支付，other_out=支付其他与经营活动有关的现金
@@ -133,7 +133,7 @@ TOOLS = [
     },
     {
         "name": "check_duplicate",
-        "description": "重复入账检测：生成凭证前必须调用。按发票号查已导入的发票，按金额（±30天日期窗口、可选摘要关键字）查疑似重复凭证",
+        "description": "重复入账检测（实质性重复）：生成凭证前必须调用。发票号精确匹配已入账发票；金额相同且同日、科目类别与往来对象一致才算疑似重复——仅金额相同不算（正常业务也会有重复金额）",
         "parameters": {
             "type": "object",
             "properties": {
@@ -141,6 +141,8 @@ TOOLS = [
                 "amount": {"type": "string", "description": "凭证合计金额（借贷总额），可空"},
                 "date": {"type": "string", "description": "业务日期 YYYY-MM-DD，可空"},
                 "keyword": {"type": "string", "description": "摘要关键字，可空"},
+                "account_code": {"type": "string", "description": "本笔主要科目编码（借方最大行科目），用于区分类别，可空"},
+                "contact_id": {"type": "string", "description": "本笔往来对象 ID（find_or_create_contact 返回值），用于区分往来，可空"},
             },
         },
     },
@@ -260,8 +262,62 @@ def _tool_find_or_create_contact(db: Session, book_id: int, name: str, ctype: st
     return json.dumps({"contact_id": contact.id, "name": contact.name, "ctype": contact.ctype, "created": True}, ensure_ascii=False)
 
 
-def _tool_check_duplicate(db: Session, book_id: int, invoice_no: str = "", amount: str = "", date_str: str = "", keyword: str = "") -> str:
-    """重复入账检测：发票号精确匹配**已入账**（已关联凭证）的发票；金额匹配 ±30 天窗口内的现有凭证。
+def _line_val(line, key: str):
+    """兼容 dict（AI 候选）与 ORM VoucherLine 取行字段值。"""
+    return line.get(key) if isinstance(line, dict) else getattr(line, key, None)
+
+
+def _primary_account(lines) -> str:
+    """凭证主要科目：借方最大金额行；借方全零取贷方最大行——业务类别信号。"""
+    best_code, best_amt = "", Decimal("0")
+    for flip in ("debit", "credit"):
+        for line in lines or []:
+            try:
+                amt = Decimal(str(_line_val(line, flip) or "0"))
+            except Exception:
+                continue
+            if amt > best_amt:
+                best_amt, best_code = amt, str(_line_val(line, "account_code") or "")
+        if best_code:
+            return best_code
+    return best_code
+
+
+def _contacts_set(lines) -> set[str]:
+    """凭证涉及的往来对象集合（非空 contact_id）。"""
+    out: set[str] = set()
+    for line in lines or []:
+        cid = _line_val(line, "contact_id")
+        if cid:
+            out.add(str(cid))
+    return out
+
+
+def _is_substantive_dup(hist_lines, cand_primary: str, cand_contacts: set[str]) -> bool:
+    """实质性重复比对：历史凭证与候选凭证的科目类别、往来对象是否指向同一业务。
+
+    - 科目：主要科目相同或互为前缀（5602 vs 5602.01 视为同类）；任一方为空不比对
+    - 往来：双方都挂了往来且无交集 → 不同业务，放行（同金额不同供应商是正常现象）；
+      任一方未挂往来 → 无区分证据，继续由金额/日期/科目判定
+    """
+    hist_primary = _primary_account(hist_lines)
+    if cand_primary and hist_primary and not (
+        cand_primary == hist_primary or cand_primary.startswith(hist_primary) or hist_primary.startswith(cand_primary)
+    ):
+        return False
+    hist_contacts = _contacts_set(hist_lines)
+    if cand_contacts and hist_contacts and not (cand_contacts & hist_contacts):
+        return False
+    return True
+
+
+def _tool_check_duplicate(db: Session, book_id: int, invoice_no: str = "", amount: str = "", date_str: str = "", keyword: str = "", account_code: str = "", contact_id: str = "") -> str:
+    """重复入账检测（实质性重复导向）。
+
+    - 发票号精确匹配**已入账**（已关联凭证）的发票 → 实质性重复（同一单据二次入账）；
+    - 金额通道收紧：**金额相等 + 日期同一天 + 科目类别一致 + 往来对象不冲突** 才算疑似重复。
+      仅金额相同（不同日/不同科目/不同往来）不算——重复金额是正常业务，不误伤；
+    - 无金额时按摘要关键字兜底（同一天 + 摘要包含 + 同样的科目往来比对）。
 
     台账中已导入但尚未生成凭证的发票不算重复——那正是"发票驱动记账"的正常起点。
     """
@@ -294,19 +350,27 @@ def _tool_check_duplicate(db: Session, book_id: int, invoice_no: str = "", amoun
     except ValueError:
         biz_date = None
 
+    cand_primary = account_code.strip()
+    cand_contacts = {contact_id.strip()} if contact_id.strip() else set()
+
     if amt is not None:
-        # 金额是主信号：金额相等 + 日期 ±30 天窗口即视为疑似重复（不做摘要硬过滤，避免措辞差异漏检）
+        # 金额相等 + 日期同一天 + 科目/往来实质一致（同一单据二次录入的特征）；
+        # 只有金额相同但日期/科目/往来任一不同 → 正常业务，不算重复
         stmt = select(Voucher).where(Voucher.book_id == book_id, Voucher.total_debit == amt)
         rows = db.scalars(stmt.order_by(Voucher.voucher_date.desc()).limit(30)).all()
         if biz_date:
-            rows = [v for v in rows if abs((v.voucher_date - biz_date).days) <= 30]
+            rows = [v for v in rows if v.voucher_date == biz_date]
+        rows = [v for v in rows if _is_substantive_dup(v.lines, cand_primary, cand_contacts)]
     elif keyword.strip():
-        # 无金额时按摘要关键字兜底（近 90 天）
+        # 无金额时按摘要关键字兜底（同一天 + 摘要包含 + 科目往来比对）
         kw = keyword.strip()
         stmt = select(Voucher).where(Voucher.book_id == book_id).order_by(Voucher.voucher_date.desc()).limit(200)
-        rows = [v for v in db.scalars(stmt).all() if kw in (v.lines[0].summary if v.lines else "")]
-        if biz_date:
-            rows = [v for v in rows if abs((v.voucher_date - biz_date).days) <= 90]
+        rows = [
+            v for v in db.scalars(stmt).all()
+            if kw in (v.lines[0].summary if v.lines else "")
+            and (not biz_date or v.voucher_date == biz_date)
+            and _is_substantive_dup(v.lines, cand_primary, cand_contacts)
+        ]
     else:
         rows = []
     result["similar_vouchers"] = [
@@ -366,6 +430,8 @@ def execute_tool(db: Session, book_id: int, name: str, arguments: dict) -> str:
                 amount=str(arguments.get("amount", "")),
                 date_str=str(arguments.get("date", "")),
                 keyword=str(arguments.get("keyword", "")),
+                account_code=str(arguments.get("account_code", "")),
+                contact_id=str(arguments.get("contact_id", "")),
             )
         if name == "ask_user":
             return ASK_USER_SENTINEL
@@ -416,6 +482,8 @@ def _hard_check_duplicate(db: Session, book_id: int, voucher: dict) -> str | Non
     """代码层硬兜底：模型生成的凭证在返回前强制查重，命中则返回警告文本（未命中返回 None）。
 
     不依赖模型自觉调用 check_duplicate 工具——提示词是软约束，这里是硬约束。
+    查重口径与 _tool_check_duplicate 一致（实质性重复）：发票号精确命中已入账发票，
+    或同日同金额同科目往来一致的历史凭证。
     """
     lines = voucher.get("lines") or []
     if not lines:
@@ -430,8 +498,16 @@ def _hard_check_duplicate(db: Session, book_id: int, voucher: dict) -> str | Non
         return None
     d = str(voucher.get("voucher_date") or date.today().isoformat())
     kw = str(lines[0].get("summary") or "")
+    # 从候选凭证提取科目类别与往来对象（实质性重复的比对信号）
+    primary = _primary_account(lines)
+    contacts = sorted(_contacts_set(lines))
     try:
-        data = json.loads(_tool_check_duplicate(db, book_id, amount=str(amt), date_str=d, keyword=kw))
+        data = json.loads(
+            _tool_check_duplicate(
+                db, book_id, amount=str(amt), date_str=d, keyword=kw,
+                account_code=primary, contact_id=contacts[0] if contacts else "",
+            )
+        )
     except Exception:
         return None
     if not data.get("has_duplicate"):
@@ -445,8 +521,8 @@ def _hard_check_duplicate(db: Session, book_id: int, voucher: dict) -> str | Non
         for r in data.get("invoice_no_match", [])
     ]
     return (
-        f"⚠️ {DUP_WARN_MARK}：已存在相同金额的凭证/发票记录——{'；'.join(parts)}。"
-        "请确认是否仍要入账：回复「确认入账」我就继续生成，或告诉我这笔和上面那笔的区别。"
+        f"⚠️ {DUP_WARN_MARK}：检测到与本笔同日、同金额、同科目的凭证或已入账发票号——{'；'.join(parts)}。"
+        "请确认是否同一单据重复入账：回复「确认入账」我就继续生成，或告诉我这笔和上面那笔的区别。"
     )
 
 
