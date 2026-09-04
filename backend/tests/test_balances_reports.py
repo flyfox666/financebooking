@@ -82,3 +82,68 @@ def test_detail_ledger_requires_leaf(db_session, mock_month, book):
             period_from="2026-08",
             period_to="2026-08",
         )
+
+
+def _make_unposted(db_session, book, mama_user, auditor_user, account_code, total, status):
+    """造一张未过账凭证（费用借方 + 银行贷方），可指定 draft/submitted/audited 状态。"""
+    from app.ledger import voucher_service
+
+    voucher = voucher_service.create_voucher(
+        db_session, book_id=book.id, voucher_date="2026-08-20", attachment_count=1,
+        lines=[
+            {"summary": f"未过账-{account_code}", "account_code": account_code, "debit": total, "credit": "0"},
+            {"summary": "银行付款", "account_code": "1002", "debit": "0", "credit": total},
+        ],
+        operator_id=mama_user.id,
+    )
+    if status in ("submitted", "audited"):
+        voucher_service.submit_voucher(db_session, voucher_id=voucher.id, operator_id=mama_user.id)
+    if status == "audited":
+        voucher_service.audit_voucher(db_session, voucher_id=voucher.id, operator=auditor_user)
+    return voucher
+
+
+def test_trial_balance_unposted_none_returns_zero(db_session, mock_month, book):
+    """默认不含未过账：所有行未过账列全 0，account 状态标记为 none（历史行为不变）。"""
+    report = balances.trial_balance(db_session, book_id=book.id, period="2026-08")
+    assert report["unposted"] == "none"
+    assert report["totals"]["unposted_debit"] == "0.00"
+    assert report["totals"]["unposted_credit"] == "0.00"
+    rows = rows_by_code(report)
+    assert all(row["unposted_debit"] == "0.00" and row["unposted_credit"] == "0.00" for row in report["rows"])
+    assert report["is_balanced"] is True
+
+
+def test_trial_balance_unposted_pending_and_all(db_session, mock_month, book, mama_user, auditor_user):
+    """三档口径：pending 只含待审+已审；all 再含草稿；none 全零。"""
+    _make_unposted(db_session, book, mama_user, auditor_user, "5602.01", "500.00", "submitted")
+    _make_unposted(db_session, book, mama_user, auditor_user, "5602.02", "300.00", "audited")
+    _make_unposted(db_session, book, mama_user, auditor_user, "5602.03", "200.00", "draft")
+
+    none = rows_by_code(balances.trial_balance(db_session, book_id=book.id, period="2026-08"))
+    pending = rows_by_code(balances.trial_balance(db_session, book_id=book.id, period="2026-08", unposted="pending"))
+    allrows = rows_by_code(balances.trial_balance(db_session, book_id=book.id, period="2026-08", unposted="all"))
+
+    # none：不计未过账
+    assert none["5602.01"]["unposted_debit"] == "0.00"
+    # pending：submitted + audited 计入，draft 不计
+    assert pending["5602.01"]["unposted_debit"] == "500.00"
+    assert pending["5602.02"]["unposted_debit"] == "300.00"
+    assert pending["5602.03"]["unposted_debit"] == "0.00"
+    # all：额外含 draft
+    assert allrows["5602.03"]["unposted_debit"] == "200.00"
+
+
+def test_trial_balance_unposted_not_merged(db_session, mock_month, book, mama_user, auditor_user):
+    """未过账金额走独立列，不并入已过账三栏，且不破坏平衡。"""
+    before = rows_by_code(balances.trial_balance(db_session, book_id=book.id, period="2026-08"))
+    _make_unposted(db_session, book, mama_user, auditor_user, "5602.01", "500.00", "submitted")
+    after = rows_by_code(balances.trial_balance(db_session, book_id=book.id, period="2026-08", unposted="pending"))
+
+    # 已过账发生额不变（未过账只进 unposted 列）
+    assert before["5602.01"]["period_debit"] == after["5602.01"]["period_debit"]
+    # 未过账金额出现在独立列
+    assert after["5602.01"]["unposted_debit"] == "500.00"
+    # 已过账三栏仍平衡
+    report = balances.trial_balance(db_session, book_id=book.id, period="2026-08", unposted="pending")
+    assert report["is_balanced"] is True
