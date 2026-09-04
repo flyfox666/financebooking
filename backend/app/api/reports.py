@@ -22,6 +22,18 @@ def get_trial_balance(
     return balances.trial_balance(db, book_id=book_id, period=period, complete=complete, unposted=unposted)
 
 
+@router.get("/checks")
+def get_checks(
+    book_id: int,
+    period: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    from app.ledger.check_service import run_checks
+
+    return run_checks(db, book_id=book_id, period=period)
+
+
 @router.get("/aux-balance")
 def get_aux_balance(
     book_id: int,
