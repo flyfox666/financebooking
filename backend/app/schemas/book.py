@@ -31,3 +31,21 @@ class AiStyleIn(BaseModel):
     tags: list[str] = []
     business_desc: str = Field(default="", max_length=1000)
     style_prompt: str = Field(default="", max_length=2000)
+
+
+class MemberItem(BaseModel):
+    user_id: int
+    role: Literal["admin", "bookkeeper", "auditor"] = "bookkeeper"
+
+
+class BookMembersIn(BaseModel):
+    members: list[MemberItem] = []
+
+
+class UserBookItem(BaseModel):
+    book_id: int
+    role: Literal["admin", "bookkeeper", "auditor"] = "bookkeeper"
+
+
+class UserBooksIn(BaseModel):
+    books: list[UserBookItem] = []
