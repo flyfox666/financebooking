@@ -1,5 +1,5 @@
 alwaysApply: true
-description: LedgerAI 智账项目业务硬约束。始终生效：所有对话（无论前端/后端/运维）在产生任何影响业务数据的决策前必须检查本规则不被违反。
+description: 有数 LedgerAI 项目业务硬约束。始终生效：所有对话（无论前端/后端/运维）在产生任何影响业务数据的决策前必须检查本规则不被违反。
 ---
 
 # 业务硬约束（Always Apply）

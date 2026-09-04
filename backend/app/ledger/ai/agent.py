@@ -28,7 +28,7 @@ from app.models.voucher import Voucher
 MAX_STEPS = 8
 ASK_USER_SENTINEL = "__ASK_USER__"
 
-SYSTEM_PROMPT = """你是「智账」记账助手，服务一家公司（《小企业会计准则》），纳税人性质见下方账套信息。
+SYSTEM_PROMPT = """你是「有数」记账助手，服务一家公司（《小企业会计准则》），纳税人性质见下方账套信息。
 你的任务：理解用户丢来的单据或描述，必要时先查数据或向用户追问，最后产出候选记账凭证。
 
 规则：

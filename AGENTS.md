@@ -1,4 +1,4 @@
-# LedgerAI 智账 · 项目级 AI 行为规范（AGENTS.md）
+# 有数 LedgerAI · 项目级 AI 行为规范（AGENTS.md）
 
 > 本文件面向 TraeIDE / 任何支持 AGENTS.md 的 AI IDE。所有在本项目 `d:\traecnproject\financebooking` 下的对话均须遵守。
 > 配套阅读：`开发进度与交接.md`（功能清单+发布记录）、`项目架构图.svg`（模块关系）。
