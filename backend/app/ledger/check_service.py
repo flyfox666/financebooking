@@ -128,36 +128,47 @@ def cash_reconciliation(db: Session, *, book_id: int, period: str) -> dict:
 # ---------- 4. 跨期衔接 ----------
 
 def period_continuity(db: Session, *, book_id: int, period: str) -> dict:
-    """本期期初 与 上期期末 的连续性。启用首期（无上年同期）跳过。"""
+    """本期期初 与 上期结账快照期末 的连续性。
+
+    对比基准是 PeriodBalance（close_period 结账时冻结的快照）而非现算值——
+    若现算对比，两边同源恒等，篡改期初/倒扎凭证会同时传导到两边互相抵消，校验形同虚设。
+    上期未结账（无快照）时跳过并说明；启用首期无上期可比。
+    """
     from app.models.book import Book
+    from app.models.report import PeriodBalance
+    from sqlalchemy import select
 
     book = db.get(Book, book_id)
     prev = _prev_period(period)
     if book and book.start_period and prev < book.start_period:
         return {"ok": True, "issues": [], "note": "启用首期，无上期可比"}
 
+    snapshots = db.scalars(
+        select(PeriodBalance).where(PeriodBalance.book_id == book_id, PeriodBalance.period == prev)
+    ).all()
+    if not snapshots:
+        return {"ok": True, "issues": [], "note": f"上期 {prev} 未结账，无结账快照可比（结账后自动校验）"}
+
     current_opening = opening_nets(db, book_id, before_period=period)
-    prev_opening = opening_nets(db, book_id, before_period=prev)
-    from app.ledger.balances import gross_sums
-
-    prev_sums = gross_sums(db, book_id, prev, prev)
-    prev_closing: dict[str, Decimal] = {}
-    for code, net in prev_opening.items():
-        prev_closing[code] = net
-    for code, sums in prev_sums.items():
-        prev_closing[code] = prev_closing.get(code, ZERO) + sums[0] - sums[1]
-
-    issues = []
-    codes = set(current_opening) | set(prev_closing)
-    for code in sorted(codes):
-        cur = current_opening.get(code, ZERO)
-        pre = prev_closing.get(code, ZERO)
+    issues: list[dict] = []
+    seen: set[str] = set()
+    for snap in snapshots:
+        seen.add(snap.account_code)
+        cur = current_opening.get(snap.account_code, ZERO)
+        pre = Decimal(str(snap.closing_debit)) - Decimal(str(snap.closing_credit))
         if abs(cur - pre) > TOLERANCE:
-            issues.append({"code": code, "opening": fmt_amount(cur), "prev_closing": fmt_amount(pre)})
+            issues.append(
+                {"code": snap.account_code, "opening": fmt_amount(cur), "prev_closing": fmt_amount(pre)}
+            )
+    # 当前有期初、但上期快照里没有的科目（新增期初而历史无据）
+    for code in sorted(set(current_opening) - seen):
+        cur = current_opening.get(code, ZERO)
+        if abs(cur) > TOLERANCE:
+            issues.append({"code": code, "opening": fmt_amount(cur), "prev_closing": fmt_amount(ZERO)})
     return {
         "ok": not issues,
         "issues": issues,
-        "note": "" if not issues else "本期期初与上期期末不一致（可能期初被改或结转异常）",
+        "note": "" if not issues else "本期期初与上期结账快照不一致（上期结账后可能倒扎凭证或期初被改）",
     }
 
 
