@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_book_access
 from app.core.database import get_db
 from app.ledger import invoice_service
 from app.ledger.exceptions import LedgerError
@@ -18,7 +18,7 @@ async def import_invoices(
     kind: str = Query(default="sales", pattern="^(sales|purchase)$"),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_book_access),
 ):
     content = await file.read()
     try:
@@ -33,7 +33,7 @@ def list_invoices(
     kind: str | None = None,
     period: str | None = None,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_book_access),
 ):
     invoices = invoice_service.list_invoices(db, book_id=book_id, kind=kind, period=period)
     voucher_ids = {inv.voucher_id for inv in invoices if inv.voucher_id}

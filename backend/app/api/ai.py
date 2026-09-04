@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_book_access
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.ledger.ai import parse as ai_parse
@@ -56,7 +56,7 @@ async def parse_document(
     note: str = Form(default=""),
     allow_vlm: bool = Form(default=True),
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_book_access),
 ):
     if file is None and not note.strip():
         raise HTTPException(status_code=400, detail="请上传单据文件或输入业务描述")
@@ -142,6 +142,7 @@ def suggest_voucher(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    require_book_access(body.book_id, db=db, user=user)
     doc = None
     doc_type = "text"
     fields: dict = {}
@@ -188,6 +189,7 @@ def chat_with_agent(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    require_book_access(body.book_id, db=db, user=user)
     from app.ledger.ai.agent import run_agent
 
     doc_context = ""
@@ -242,6 +244,10 @@ def confirm_suggestion(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    doc = db.get(AIDoc, body.doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="AI 解析记录不存在")
+    require_book_access(doc.book_id, db=db, user=user)
     try:
         voucher = ai_suggest.confirm_suggestion(
             db,
@@ -260,7 +266,7 @@ def list_documents(
     book_id: int,
     status: str | None = None,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_book_access),
 ):
     stmt = select(AIDoc).where(AIDoc.book_id == book_id)
     if status:
@@ -276,6 +282,9 @@ def discard_document(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    doc = db.get(AIDoc, doc_id)
+    if doc is not None:
+        require_book_access(doc.book_id, db=db, user=user)
     try:
         ai_suggest.discard_document(db, doc_id)
     except LedgerError as exc:

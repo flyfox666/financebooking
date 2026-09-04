@@ -1463,13 +1463,14 @@ async function renderUsers() {
   }
   $('mainArea').innerHTML = `<h3 class="view-title">👥 用户管理</h3><div id="t_body">加载中…</div>`;
   const users = await api('/api/users');
-  $('t_body').innerHTML = `<table><tr><th>用户名</th><th>姓名</th><th>角色</th><th>状态</th><th>操作</th></tr>` +
+  $('t_body').innerHTML = `<table><tr><th>用户名</th><th>姓名</th><th>全局角色</th><th>状态</th><th>操作</th></tr>` +
     users.map(u => `<tr><td>${u.username}</td><td>${u.display_name || ''}</td>
       <td><select onchange="patchUser(${u.id},{role:this.value})">
         ${['admin', 'bookkeeper', 'auditor'].map(r2 => `<option value="${r2}" ${u.role === r2 ? 'selected' : ''}>${ROLE_CN[r2]}</option>`).join('')}
       </select></td>
       <td>${u.is_active ? '<span class="badge">启用</span>' : '<span class="badge gray">停用</span>'}</td>
-      <td><button class="small ghost" onclick="resetPwd(${u.id},'${u.username}')">重置密码</button>
+      <td><button class="small ghost" onclick="grantBooks(${u.id},'${u.username}','${u.role}')">账套授权</button>
+      <button class="small ghost" onclick="resetPwd(${u.id},'${u.username}')">重置密码</button>
       <button class="small ghost" onclick="patchUser(${u.id},{is_active:${!u.is_active}})">${u.is_active ? '停用' : '启用'}</button>
       <button class="small danger" onclick="delUser(${u.id},'${u.username}')">删除</button></td></tr>`).join('') + '</table>' +
     `<div class="card" style="margin-top:1rem"><b>新增用户</b>
@@ -1478,7 +1479,56 @@ async function renderUsers() {
         <input id="nu_disp" placeholder="姓名"><select id="nu_role"><option value="bookkeeper">制单</option><option value="auditor">审核</option><option value="admin">管理员</option></select>
         <button onclick="createUser()">创建</button></div>
       <div id="nu_err" style="color:var(--danger);font-size:.82rem"></div>
-      <div class="result">角色说明：制单（日常记账）/ 审核（审核与过账）/ 管理员（全部权限）。制单与审核必须不同账号。</div></div>`;
+      <div class="result"><b>角色怎么理解</b>：全局角色 = 岗位（制单/审核/管理员，全系统唯一，制审强制分离）；
+      「账套授权」= 门禁卡（决定这个账号能进哪些公司的账，一个账号可挂多个账套）。
+      管理员天然可见全部账套，无需授权。新建账套时创建者自动成为该账套管理员。</div></div>`;
+}
+
+/* 账套授权页（用户视角：勾选该用户可访问的账套 + 每账套账套级角色） */
+async function grantBooks(userId, username, globalRole) {
+  const [userBooks, allBooks] = await Promise.all([
+    api(`/api/users/${userId}/books`),
+    api('/api/books'),
+  ]);
+  const granted = new Map(userBooks.map(b => [b.book_id, b.role]));
+  const rows = allBooks.map(b => {
+    const role = granted.get(b.id) || '';
+    return `<tr>
+      <td>${b.name}${b.taxpayer_type === 'general' ? '（一般纳税人）' : ''}</td>
+      <td style="text-align:center"><input type="checkbox" id="gb_${b.id}" ${role ? 'checked' : ''} onchange="gbToggle(${b.id})"></td>
+      <td><select id="gbr_${b.id}" ${role ? '' : 'disabled'}>
+        ${['bookkeeper', 'auditor', 'admin'].map(r2 => `<option value="${r2}" ${role === r2 ? 'selected' : ''}>${{bookkeeper:'制单',auditor:'审核',admin:'管理员'}[r2]}</option>`).join('')}
+      </select></td>
+    </tr>`;
+  }).join('');
+  $('mainArea').innerHTML = `<h3 class="view-title"><a class="link" onclick="renderUsers()">← 用户管理</a> ｜ 账套授权：${username}${globalRole === 'admin' ? '（全局管理员——天然可见所有账套，此处仅展示）' : ''}</h3>
+    <div class="card" style="max-width:640px">
+      <table><tr><th>账套</th><th style="width:80px">可访问</th><th>账套内角色</th></tr>${rows}</table>
+      <div style="display:flex;gap:.6rem;margin-top:.9rem;align-items:center">
+        <button onclick="saveGrant(${userId})">保存授权</button>
+        <button class="ghost" onclick="renderUsers()">返回</button>
+        <span id="gb_err" style="color:var(--danger);font-size:.85rem"></span>
+      </div>
+      <div class="result" style="margin-top:.7rem"><b>账套内角色</b>只影响该账套内的岗位展示（权限主干仍由全局角色决定）；
+      取消勾选 = 收回门禁，该账号将看不到此账套。至少保留一个可管理的账套管理员（全局管理员或账套管理员成员）。</div>
+    </div>`;
+}
+
+function gbToggle(bookId) {
+  $('gbr_' + bookId).disabled = !$('gb_' + bookId).checked;
+}
+
+async function saveGrant(userId) {
+  const books = [];
+  for (const b of BOOKS) {
+    if ($('gb_' + b.id) && $('gb_' + b.id).checked) {
+      books.push({ book_id: b.id, role: $('gbr_' + b.id).value });
+    }
+  }
+  try {
+    await api(`/api/users/${userId}/books`, { method: 'PUT', body: JSON.stringify({ books }) });
+    renderUsers();
+  } catch (e) { $('gb_err').textContent = e.message; }
 }
 
 async function patchUser(id, body) {

@@ -11,7 +11,13 @@ from app.models.ai import AiStyleSetting
 from app.models.book import Book
 from app.models.user import User
 from app.schemas.account import AccountCreate, AccountNode, AccountOut, AccountPatch
-from app.schemas.book import AiStyleIn, BookCreate, BookOut
+from app.schemas.book import (
+    AiStyleIn,
+    BookCreate,
+    BookMembersIn,
+    BookOut,
+    UserBooksIn,
+)
 from app.schemas.report import OpeningSetIn
 
 router = APIRouter(prefix="/api", tags=["books"])
@@ -58,6 +64,62 @@ def get_book(
     if book is None:
         raise HTTPException(status_code=404, detail="账套不存在")
     return book
+
+
+@router.get("/books/{book_id}/members")
+def get_book_members(
+    book_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """账套成员列表（admin 专属，授权管理用）。"""
+    if db.get(Book, book_id) is None:
+        raise HTTPException(status_code=404, detail="账套不存在")
+    return book_service.book_members(db, book_id)
+
+
+@router.put("/books/{book_id}/members")
+def put_book_members(
+    book_id: int,
+    body: BookMembersIn,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """整体替换账套成员（admin 专属；替换后须仍可管）。"""
+    try:
+        count = book_service.set_book_members(db, book_id=book_id, members=[m.model_dump() for m in body.members])
+    except LedgerError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"members": count}
+
+
+@router.get("/users/{user_id}/books")
+def get_user_books(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """用户被授权的账套列表（admin 专属）。"""
+    from app.models.user import User as UserModel
+
+    if db.get(UserModel, user_id) is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    return book_service.user_books(db, user_id)
+
+
+@router.put("/users/{user_id}/books")
+def put_user_books(
+    user_id: int,
+    body: UserBooksIn,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """整体设置用户的账套授权（admin 专属；防授权断链校验）。"""
+    try:
+        count = book_service.set_user_books(db, user_id=user_id, books=[b.model_dump() for b in body.books])
+    except LedgerError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"books": count}
 
 
 @router.get("/books/{book_id}/opening")

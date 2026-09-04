@@ -3,7 +3,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_book_access
 from app.core.database import get_db
 from app.ledger import attachment_service
 from app.ledger.exceptions import LedgerError
@@ -29,6 +29,7 @@ async def upload_attachment(
     user: User = Depends(get_current_user),
 ):
     voucher = _load_voucher_or_404(db, voucher_id)
+    require_book_access(voucher.book_id, db=db, user=user)
     content = await file.read()
     try:
         return attachment_service.save_attachment(
@@ -49,7 +50,8 @@ def list_attachments(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    _load_voucher_or_404(db, voucher_id)
+    voucher = _load_voucher_or_404(db, voucher_id)
+    require_book_access(voucher.book_id, db=db, user=user)
     return attachment_service.list_attachments(db, voucher_id)
 
 
@@ -60,6 +62,7 @@ def download_attachment(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    require_book_access(_load_voucher_or_404(db, voucher_id).book_id, db=db, user=user)
     try:
         attachment = attachment_service.get_attachment(db, voucher_id, attachment_id)
         content = attachment_service.read_attachment_file(attachment)
@@ -81,6 +84,7 @@ def delete_attachment(
     user: User = Depends(get_current_user),
 ):
     voucher = _load_voucher_or_404(db, voucher_id)
+    require_book_access(voucher.book_id, db=db, user=user)
     try:
         attachment_service.delete_attachment(db, voucher=voucher, attachment_id=attachment_id)
     except LedgerError as exc:

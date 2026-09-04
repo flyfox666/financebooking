@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, require_auditor_or_admin
+from app.api.deps import get_current_user, require_auditor_or_admin, require_book_access
 from app.core.database import get_db
 from app.ledger import close_service, voucher_service
 from app.ledger.exceptions import LedgerError
@@ -13,6 +13,12 @@ router = APIRouter(prefix="/api", tags=["vouchers"])
 
 def _bad_request(exc: LedgerError) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc))
+
+
+def _check_voucher_access(db: Session, user: User, voucher_id: int) -> None:
+    """单实体端点的账套访问校验：先查凭证所属账套再过门槛。"""
+    voucher = voucher_service.get_voucher(db, voucher_id)
+    require_book_access(voucher.book_id, db=db, user=user)
 
 
 _BATCH_ACTIONS = {
@@ -28,8 +34,9 @@ _BATCH_ACTIONS = {
 @router.post("/vouchers/batch")
 def batch_voucher_actions(
     body: VoucherBatchIn,
+    book_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_book_access),
 ):
     """批量状态流转：逐条执行、出错继续，返回每条结果。审核类操作需要审核员/管理员。"""
     if body.action in ("reject", "audit", "post", "unpost") and user.role not in ("auditor", "admin"):
@@ -51,7 +58,7 @@ def create_voucher(
     body: VoucherCreateIn,
     book_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_book_access),
 ):
     try:
         return voucher_service.create_voucher(
@@ -73,7 +80,7 @@ def list_vouchers(
     period: str | None = None,
     status: str | None = None,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_book_access),
 ):
     return voucher_service.list_vouchers(db, book_id=book_id, period=period, status=status)
 
@@ -85,7 +92,9 @@ def get_voucher(
     user: User = Depends(get_current_user),
 ):
     try:
-        return voucher_service.get_voucher(db, voucher_id)
+        voucher = voucher_service.get_voucher(db, voucher_id)
+        require_book_access(voucher.book_id, db=db, user=user)
+        return voucher
     except LedgerError as exc:
         raise _bad_request(exc)
 
@@ -97,6 +106,7 @@ def update_voucher(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _check_voucher_access(db, user, voucher_id)
     try:
         return voucher_service.update_voucher(
             db,
@@ -115,6 +125,7 @@ def delete_voucher(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _check_voucher_access(db, user, voucher_id)
     try:
         voucher_service.delete_voucher(db, voucher_id=voucher_id)
     except LedgerError as exc:
@@ -127,6 +138,7 @@ def submit_voucher(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _check_voucher_access(db, user, voucher_id)
     try:
         return voucher_service.submit_voucher(db, voucher_id=voucher_id, operator_id=user.id)
     except LedgerError as exc:
@@ -139,6 +151,7 @@ def reject_voucher(
     db: Session = Depends(get_db),
     user: User = Depends(require_auditor_or_admin),
 ):
+    _check_voucher_access(db, user, voucher_id)
     try:
         return voucher_service.reject_voucher(db, voucher_id=voucher_id, operator=user)
     except LedgerError as exc:
@@ -151,6 +164,7 @@ def audit_voucher(
     db: Session = Depends(get_db),
     user: User = Depends(require_auditor_or_admin),
 ):
+    _check_voucher_access(db, user, voucher_id)
     try:
         return voucher_service.audit_voucher(db, voucher_id=voucher_id, operator=user)
     except LedgerError as exc:
@@ -163,6 +177,7 @@ def post_voucher(
     db: Session = Depends(get_db),
     user: User = Depends(require_auditor_or_admin),
 ):
+    _check_voucher_access(db, user, voucher_id)
     try:
         return voucher_service.post_voucher(db, voucher_id=voucher_id, operator=user)
     except LedgerError as exc:
@@ -175,6 +190,7 @@ def unpost_voucher(
     db: Session = Depends(get_db),
     user: User = Depends(require_auditor_or_admin),
 ):
+    _check_voucher_access(db, user, voucher_id)
     try:
         return voucher_service.unpost_voucher(db, voucher_id=voucher_id)
     except LedgerError as exc:
@@ -187,6 +203,7 @@ def reverse_voucher(
     db: Session = Depends(get_db),
     user: User = Depends(require_auditor_or_admin),
 ):
+    _check_voucher_access(db, user, voucher_id)
     try:
         return voucher_service.reverse_voucher(db, voucher_id=voucher_id, operator=user)
     except LedgerError as exc:
@@ -198,7 +215,7 @@ def generate_carryover(
     period: str,
     book_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_auditor_or_admin),
+    user: User = Depends(require_book_access),
 ):
     try:
         return close_service.generate_carryover(db, book_id=book_id, period=period, operator_id=user.id)

@@ -87,15 +87,21 @@ def auditor_user(db_session):
 
 
 @pytest.fixture()
-def book(db_session):
+def book(db_session, admin_user, mama_user, auditor_user):
     from app.ledger import book_service
 
-    return book_service.create_book(
+    book = book_service.create_book(
         db_session,
         name="测试科技有限公司",
         tax_no="91310000MA1K35X00A",
         start_period="2026-08",
     )
+    # 模拟真实流程：admin 建账套后把测试用户挂为账套成员
+    # （否则业务路由的账套访问校验会正确地拦截这些用户）
+    book_service.add_member(db_session, user_id=admin_user.id, book_id=book.id, role="admin")
+    book_service.add_member(db_session, user_id=mama_user.id, book_id=book.id, role="bookkeeper")
+    book_service.add_member(db_session, user_id=auditor_user.id, book_id=book.id, role="auditor")
+    return book
 
 
 @pytest.fixture()

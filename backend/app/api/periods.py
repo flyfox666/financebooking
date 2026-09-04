@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_auditor_or_admin
+from app.api.deps import require_auditor_or_admin, require_book_access
 from app.core.database import get_db
 from app.ledger import close_service
 from app.ledger.exceptions import LedgerError

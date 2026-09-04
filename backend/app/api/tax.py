@@ -4,7 +4,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, require_admin
+from app.api.deps import get_current_user, require_admin, require_book_access
 from app.core.database import get_db
 from app.ledger.tax import calendar as tax_calendar
 from app.ledger.tax.cit import calc_cit
@@ -28,7 +28,7 @@ def get_vat(
     quarter: int,
     unissued_income: float = 0.0,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_book_access),
 ):
     return calc_vat(
         db,
@@ -48,7 +48,7 @@ def get_cit(
     assets: float | None = None,
     prepaid_prev: float = 0.0,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_book_access),
 ):
     return calc_cit(
         db,
@@ -66,7 +66,7 @@ def post_stamp(
     body: StampCalcIn,
     book_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_book_access),
 ):
     try:
         return calc_stamp(
@@ -114,7 +114,7 @@ def get_tax_param(
     book_id: int,
     on_date: date | None = None,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_book_access),
 ):
     try:
         value = get_param(db, book_id=book_id, tax=tax, name=name, on_date=on_date)
@@ -158,7 +158,7 @@ def export_tax(
     quarter: int,
     unissued_income: float = 0.0,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_book_access),
 ):
     book = db.get(Book, book_id)
     if book is None:

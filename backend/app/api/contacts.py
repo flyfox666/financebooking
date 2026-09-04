@@ -3,7 +3,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, require_admin
+from app.api.deps import get_current_user, require_admin, require_book_access
 from app.core.database import get_db
 from app.ledger import aux_service
 from app.ledger.exceptions import LedgerError
@@ -17,7 +17,7 @@ def list_contacts(
     book_id: int,
     ctype: str | None = None,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_book_access),
 ):
     from app.ledger.aux_service import contact_used_by_labels
 
@@ -41,7 +41,7 @@ def create_contact(
     ctype: Literal["customer", "supplier"] = "customer",
     tax_no: str = "",
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_book_access),
 ):
     try:
         contact = aux_service.create_contact(db, book_id=book_id, name=name, ctype=ctype, tax_no=tax_no)

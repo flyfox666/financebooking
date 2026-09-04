@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_admin
 from app.core.database import get_db
 from app.core.security import hash_password
+from app.models.book import UserBook
 from app.models.user import User
 from app.schemas.auth import UserCreate, UserOut, UserPatch
 
@@ -91,5 +92,8 @@ def delete_user(
         )
         if not remaining:
             raise HTTPException(status_code=400, detail="不能删除最后一个管理员")
+    # 级联清理账套成员关系（防孤儿授权）；若该用户是某账套唯一 admin 成员，
+    # 账套仍可被全局 admin 管理（admin 天然可见全部），故不阻断删除。
+    db.query(UserBook).filter(UserBook.user_id == user.id).delete(synchronize_session=False)
     db.delete(user)
     db.commit()
