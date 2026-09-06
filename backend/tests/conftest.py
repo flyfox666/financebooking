@@ -37,6 +37,9 @@ def db_session(engine):
 def client(engine, db_session, monkeypatch):
     monkeypatch.setattr("app.main.run_migrations", lambda: None)
     monkeypatch.setattr("app.main.seed_llm_provider", lambda: None)
+    # seed_default_admin 走 SessionLocal()（真实库），测试用内存库必须一并 stub，
+    # 否则 lifespan 会去连 .env 里的 sqlite:////data/ledger.db
+    monkeypatch.setattr("app.main.seed_default_admin", lambda: None)
 
     def override_get_db():
         yield db_session

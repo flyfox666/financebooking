@@ -23,6 +23,10 @@ backend/data/
 # vendored 依赖（体积大，pip 按 requirements.txt 还原即可）
 backend/.deps/
 
+# 打包构建产物（.spec 是构建源码保留，venv/exe 产物忽略）
+build/
+dist/
+
 # IDE 本地工具
 .tools/
 

@@ -121,6 +121,38 @@ def parse_invoice_qr_payload(payload: str) -> dict:
 
 
 def decode_qr_fields(content: bytes) -> dict:
+    """二维码 → 发票字段（五层管道第一层）。
+
+    优先 OpenCV（自包含、无外部 DLL）；不可用则回退 pyzbar（Linux Docker，
+    依赖系统 libzbar0）。任一失败返回空字段，静默降级到后续解析层。
+    """
+    result = _decode_qr_opencv(content)
+    if result is not None:
+        return result
+    return _decode_qr_pyzbar(content)
+
+
+def _decode_qr_opencv(content: bytes) -> dict | None:
+    """OpenCV 二维码解码（Windows 打包环境优先，避免 zbar 依赖 VC++2013 运行库）。"""
+    try:
+        import cv2
+        import numpy as np
+        from PIL import Image
+    except Exception:
+        return None
+    try:
+        image = Image.open(BytesIO(content)).convert("RGB")
+        bgr = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+        data, _, _ = cv2.QRCodeDetector().detectAndDecode(bgr)
+    except Exception:
+        return None
+    if not data:
+        return None
+    return parse_invoice_qr_payload(data)
+
+
+def _decode_qr_pyzbar(content: bytes) -> dict:
+    """pyzbar 二维码解码（Linux Docker 兜底路径）。"""
     try:
         from PIL import Image
         from pyzbar.pyzbar import decode
