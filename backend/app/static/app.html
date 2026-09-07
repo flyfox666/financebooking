@@ -24,6 +24,25 @@
   .rpanel .kv { display:flex; justify-content:space-between; font-size:.8rem; padding:.15rem 0; }
   .rpanel .sum-group { font-size:.7rem; color:var(--accent); border-top:1px dashed var(--rule); margin-top:.45rem; padding-top:.4rem; }
   .rpanel .sum-group:first-child { border-top:none; margin-top:0; padding-top:0; }
+  .summary-box { min-width:0; }
+  .summary-box .chip { color:var(--ink); }
+  .summary-box .kv { display:flex; justify-content:space-between; gap:.6rem; align-items:baseline; padding:.3rem 0; font-size:.83rem; }
+  .summary-box .kv>span { min-width:0; overflow-wrap:anywhere; }
+  .summary-value { background:transparent; color:var(--accent); padding:0; font:600 .85rem Consolas,monospace; text-align:right; overflow-wrap:anywhere; min-width:0; }
+  .summary-value:hover { text-decoration:underline; }
+  .summary-note { color:var(--muted); font-size:.74rem; line-height:1.6; margin:.35rem 0; overflow-wrap:anywhere; }
+  .summary-box .sum-group { color:var(--accent); font-weight:700; padding-top:.7rem; margin-top:.6rem; border-top:1px solid var(--rule); }
+  .summary-box details>summary { cursor:pointer; color:var(--accent); font-size:.8rem; margin:.5rem 0; }
+  .summary-box .primary-profit { border-top:1px solid var(--rule); font-weight:700; }
+  .summary-box .negative { color:var(--danger); }
+  .overview-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1rem; }
+  .overview-grid .wide { grid-column:1/-1; }
+  .tax-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.7rem; margin:.8rem 0; }
+  .tax-fields label { display:flex; flex-direction:column; gap:.3rem; font-size:.8rem; min-width:0; }
+  .tax-fields input,.tax-fields select { width:100%; min-width:0; }
+  .tax-fields .wide { grid-column:1/-1; }
+  .summary-detail { border:1px solid var(--rule); padding:.65rem; border-radius:8px; margin:.5rem 0; overflow-wrap:anywhere; }
+  @media(max-width:680px) { .overview-grid,.tax-fields { grid-template-columns:minmax(0,1fr); } .overview-grid .card { overflow-x:visible; } }
   .rpanel .kv b.chip-link { cursor:pointer; color:var(--accent); text-decoration:underline; }
   .rpanel .remind { background:var(--amber-soft); border-radius:6px; padding:.4rem .5rem; font-size:.75rem; margin-bottom:.3rem; }
   .card { background:#fff; border:1px solid var(--rule); border-radius:10px; padding:.8rem 1rem; margin-bottom:.8rem; }
@@ -105,6 +124,7 @@
   </div>
 
   <div class="side" id="sideNav">
+    <div data-view="overview">📈 经营与资金</div>
     <div data-view="chat">💬 记账助手</div>
     <div class="active" data-view="vouchers">📋 凭证</div>
     <div data-view="accounts">🗂 科目设置</div>
@@ -325,7 +345,7 @@ function switchView(view) {
   if (view === 'llm') { window.open('/settings', '_blank'); return; }
   currentView = view;
   updateNav();
-  ({ chat: renderChat, vouchers: renderVouchers, accounts: renderAccounts, contacts: renderContactsView, tb: renderTB, reports: renderReports,
+  ({ overview: renderOverview, chat: renderChat, vouchers: renderVouchers, accounts: renderAccounts, contacts: renderContactsView, tb: renderTB, reports: renderReports,
      opening: renderOpening, invoices: renderInvoices, tax: renderTax, users: renderUsers, aistyle: renderAiStyle, backup: renderBackup })[view]();
 }
 
@@ -1560,22 +1580,80 @@ async function downloadBackup(button) {
   finally { button.disabled=false; }
 }
 
-async function renderTax() {
-  const [y, m] = PERIOD.split('-');
-  const quarter = Math.ceil(parseInt(m, 10) / 3);
-  $('mainArea').innerHTML = `<h3 class="view-title">💰 报税（${y}Q${quarter}）</h3><div id="t_body">加载中…</div>`;
-  const vat = await api(`/api/tax/vat?book_id=${BOOK.id}&year=${y}&quarter=${quarter}`);
-  const cit = await api(`/api/tax/cit?book_id=${BOOK.id}&year=${y}&quarter=${quarter}`);
-  const reminders = await api('/api/tax/reminders?within_days=60');
-  $('t_body').innerHTML = `
-    <div class="card"><b>增值税（${y}Q${quarter}）</b>
-      <div class="kv">季度销售额 ${vat.quarter_total_incl} ｜ 起征点 ${vat.threshold} ｜ ${vat.exempt ? '✅ 免税' : '全额计税'}</div>
-      <div class="kv">应纳增值税 <b>${vat.vat_payable}</b> ｜ 附加税费 ${vat.surtax.total}</div>
-      <div class="result">${vat.hints.join('；')}</div></div>
-    <div class="card"><b>企业所得税预缴</b>
-      <div class="kv">累计利润 ${cit.profit_ytd} ｜ ${cit.actual_rate} ｜ 本期应预缴 <b>${cit.prepaid_this}</b></div></div>
-    <div class="card"><b>申报辅助表</b><button class="ghost small" onclick="window.open('/api/tax/export?book_id=${BOOK.id}&year=${y}&quarter=${quarter}')">导出 Excel</button></div>
-    <div class="card"><b>近 60 天征期</b>${reminders.map(r2 => `<div class="kv">⏰ ${r2.due_date} ${r2.tax}（${r2.period}）</div>`).join('') || '<div class="result">无</div>'}</div>`;
+const CIT_FORMS=new Map();
+function taxFormKey(){return BOOK.id+':'+PERIOD;}
+function readCitInputs(){
+  const result={adjustments_confirmed:!!$('cit_confirm')?.checked};
+  for(const [param,id] of [['employees','cit_employees'],['assets','cit_assets'],['prepaid_prev','cit_prepaid'],['adjustment_net','cit_adjustment'],['industry_eligible','cit_industry']]){
+    const value=$(id)?.value;
+    if(value!=='' && value!=null) result[param]=value;
+  }
+  return result;
+}
+function changeCitInput(){
+  CIT_FORMS.set(taxFormKey(),readCitInputs());
+  if($('cit_result')) $('cit_result').innerHTML='<div class="summary-note">输入已变更，请重新核算；导出会使用当前输入重新计算。</div>';
+}
+function citResultMarkup(cit){
+  const labels={pending:'资料待核对',estimated:'辅助估算',not_applicable:'此账套不适用',policy_unverified:'该年度政策待核验'};
+  return '<div class="summary-note">状态：'+labels[cit.status]+'</div><div>累计利润总额 <b>'+sumMoney(cit.profit_ytd)+'</b> ｜ 累计净利润 '+sumMoney(cit.net_profit_ytd)+'</div>'+
+    '<div>调整后实际利润额：'+(cit.actual_profit??'待核对')+'</div>'+
+    '<div>小微优惠：'+(cit.preferential==null?'待核对':cit.preferential?'符合已填条件':'不符合已填条件')+' ｜ 估算税负：'+(cit.actual_rate??'—')+'</div>'+
+    '<div>累计估算所得税：'+(cit.tax_total_ytd??'—')+' ｜ 本期估算预缴：<b>'+(cit.prepaid_this??'待核对')+'</b></div>'+
+    cit.hints.map(h=>'<div class="summary-note">'+escapeHTML(h)+'</div>').join('');
+}
+async function calculateCit(){
+  const target=$('cit_result'), bookId=BOOK.id, period=PERIOD, inputs=readCitInputs(), signature=JSON.stringify(inputs);
+  CIT_FORMS.set(taxFormKey(),inputs);
+  target.textContent='核算中…';
+  const [year,month]=period.split('-');
+  try{
+    const cit=await api('/api/tax/cit?'+new URLSearchParams({book_id:bookId,year,quarter:Math.ceil(Number(month)/3),...inputs}));
+    if(target.isConnected && BOOK.id===bookId && PERIOD===period && JSON.stringify(readCitInputs())===signature) target.innerHTML=citResultMarkup(cit);
+  }catch(e){if(target.isConnected && BOOK.id===bookId && PERIOD===period && JSON.stringify(readCitInputs())===signature) target.textContent='无法核算：'+e.message;}
+}
+async function exportTaxCurrent(){
+  const [year,month]=PERIOD.split('-'), bookId=BOOK.id, period=PERIOD;
+  const query=new URLSearchParams({book_id:bookId,year,quarter:Math.ceil(Number(month)/3),vat_frequency:calendarFrequency(),...readCitInputs()});
+  const msg=$('tax_export_status');
+  try{
+    const response=await fetch('/api/tax/export?'+query,{headers:{Authorization:'Bearer '+TOKEN}});
+    if(!response.ok) throw new Error(await errorText(response));
+    const blob=await response.blob();
+    if(BOOK.id!==bookId || PERIOD!==period) return;
+    const url=URL.createObjectURL(blob), link=document.createElement('a');
+    link.href=url; link.download='申报辅助-'+year+'Q'+Math.ceil(Number(month)/3)+'.xlsx'; link.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    if(msg?.isConnected) msg.textContent='已导出；未确认内容会标为待核对。';
+  }catch(e){if(msg?.isConnected) msg.textContent='导出失败：'+e.message;}
+}
+async function renderTax(){
+  const bookId=BOOK.id, period=PERIOD, [year,month]=period.split('-'), quarter=Math.ceil(Number(month)/3);
+  const inputs=CIT_FORMS.get(taxFormKey())||{}, val=key=>escapeHTML(inputs[key]??''), frequency=calendarFrequency();
+  $('mainArea').innerHTML='<h3 class="view-title">💰 申报辅助（'+year+'Q'+quarter+'）</h3><div id="tax_body">加载中…</div>';
+  const target=$('tax_body');
+  try{
+    const [vat,cit,reminders]=await Promise.all([
+      BOOK.taxpayer_type==='small_scale'?api('/api/tax/vat?'+new URLSearchParams({book_id:bookId,year,quarter})):Promise.resolve(null),
+      api('/api/tax/cit?'+new URLSearchParams({book_id:bookId,year,quarter,...inputs})),
+      api('/api/tax/reminders?'+new URLSearchParams({book_id:bookId,within_days:60,vat_frequency:frequency}))
+    ]);
+    if(!target.isConnected || BOOK.id!==bookId || PERIOD!==period) return;
+    target.innerHTML='<div class="card"><b>增值税季度核对汇总</b>'+
+      (vat?'<div>季度销售额 '+sumMoney(vat.quarter_total_incl)+' ｜ 季度起征点 '+sumMoney(vat.threshold)+'</div><div>估算增值税 '+sumMoney(vat.vat_payable)+' ｜ 附加税费 '+sumMoney(vat.surtax.total)+'</div><div class="summary-note">'+vat.hints.map(escapeHTML).join('；')+'</div>':'<div class="summary-note">一般纳税人完整申报尚未支持，请使用已核验的申报工具。</div>')+
+      '<div class="summary-note">本块为小规模季度辅助汇总；按月申报时不能直接据此填月报。申报频率须与税务登记一致。</div></div>'+
+      '<div class="card"><b>企业所得税预缴核对</b><div class="tax-fields" oninput="changeCitInput()" onchange="changeCitInput()">'+
+      '<label>截至本期从业人数季度平均值<input id="cit_employees" type="number" min="0" step="any" value="'+val('employees')+'" placeholder="未填写"></label>'+
+      '<label>截至本期资产总额季度平均值（元）<input id="cit_assets" type="number" min="0" step="any" value="'+val('assets')+'" placeholder="未填写"></label>'+
+      '<label>是否从事国家非限制和禁止行业<select id="cit_industry"><option value="">待确认</option><option value="true" '+(String(inputs.industry_eligible)==='true'?'selected':'')+'>是</option><option value="false" '+(String(inputs.industry_eligible)==='false'?'selected':'')+'>否</option></select></label>'+
+      '<label>本年以前季度已预缴（元）<input id="cit_prepaid" type="number" min="0" step="0.01" value="'+escapeHTML(inputs.prepaid_prev??'0')+'"></label>'+
+      '<label>预缴调整净额（元，调增正／调减负）<input id="cit_adjustment" type="number" step="0.01" value="'+escapeHTML(inputs.adjustment_net??'0')+'"></label>'+
+      '<label style="display:block"><input id="cit_confirm" type="checkbox" style="width:auto" '+(inputs.adjustments_confirmed?'checked':'')+'> 已核对适用的预缴调整项目；无调整时确认净额为0</label></div>'+
+      '<button onclick="calculateCit()">核算预缴辅助数</button><div id="cit_result">'+citResultMarkup(cit)+'</div></div>'+
+      '<div class="card"><b>申报辅助文件</b> '+(vat?'<button class="ghost small" onclick="exportTaxCurrent()">导出 Excel</button>':'')+'<div id="tax_export_status" class="summary-note">导出保留核对状态；最终申报请核对电子税务局。</div></div>'+
+      '<div class="card"><b>近60天申报事项</b><div class="summary-note">增值税日历视图：<select aria-label="增值税申报频率" onchange="changeCalendarFrequency(this.value)"><option value="quarterly" '+(frequency==='quarterly'?'selected':'')+'>按季</option><option value="monthly" '+(frequency==='monthly'?'selected':'')+'>按月</option></select> 仅记忆本浏览器的账套视图选择，不更改税务登记。</div>'+
+      reminders.map(reminderMarkup).join('')+'<div class="summary-note">印花税、财务报表报送及其他税费，按主管税务机关认定和当地通知核对；此日历不代表完整税种清单。</div></div>';
+  }catch(e){if(target.isConnected && BOOK.id===bookId && PERIOD===period) target.textContent='加载失败：'+e.message;}
 }
 
 /* ---------- 用户管理 ---------- */
@@ -1676,36 +1754,96 @@ async function createUser() {
 }
 
 /* ---------- 右栏 ---------- */
-async function loadReminders() {
+let SUM_SCOPE = 'month', SUM_DATA = null, SUM_REQUEST = 0, DETAIL_REQUEST = 0;
+const sumMoney = value => value == null ? '待检查' : escapeHTML(value);
+function summaryReport(tab) { reportTab = tab; switchView('reports'); }
+function summaryScope(value) { SUM_SCOPE = value; paintSummary(); }
+function summaryMarkup(s, expanded=false) {
+  const values = Object.fromEntries(s.profit_metrics.map(r => [r.key, r]));
+  const row = (label, value, key, cls='') => '<div class="kv '+cls+'"><span>'+escapeHTML(label)+'</span>'+
+    (key ? '<button class="summary-value '+(Number(value)<0?'negative':'')+'" onclick="openSummaryDetail(\''+key+'\')">'+sumMoney(value)+'</button>' : '<b>'+sumMoney(value)+'</b>')+'</div>';
+  const profitRow = key => row(values[key].label, values[key][SUM_SCOPE], 'is:'+key, key==='net_profit'?'primary-profit':'');
+  const status = Object.entries({draft:'草稿',submitted:'待审核',audited:'已审核',posted:'已过账'}).map(([key,label]) =>
+    '<button class="chip" onclick="jumpVoucherStatus(\''+key+'\')">'+label+' '+s.voucher_status[key]+'</button>').join('');
+  const changes = ['operating_revenue','net_profit'].map(key => values[key].month_change == null ? '' :
+    '<div class="summary-note">'+values[key].label+'较上月 '+(Number(values[key].month_change)>0?'+':'')+sumMoney(values[key].month_change)+'</div>').join('');
+  const scope = '<select aria-label="概要统计范围" onchange="summaryScope(this.value)"><option value="month" '+(SUM_SCOPE==='month'?'selected':'')+'>本月</option><option value="year_to_date" '+(SUM_SCOPE==='year_to_date'?'selected':'')+'>本年累计</option></select>';
+  const overview = '<div class="'+(expanded?'wide':'')+'"><div class="summary-note">'+escapeHTML(s.period)+' · 金额单位：元 · 已过账口径</div><div class="chips">'+status+'</div>'+
+    s.warnings.map(w=>'<div class="summary-note negative">'+escapeHTML(w)+'</div>').join('')+'</div>';
+  const profit = '<div class="'+(expanded?'card':'')+'"><div class="sum-group">📈 本期经营</div>'+scope+
+    ['operating_revenue','operating_cost','gross_profit'].map(profitRow).join('')+
+    row('毛利率（分析指标）',s.gross_margin[SUM_SCOPE] == null?'—':s.gross_margin[SUM_SCOPE]+'%')+
+    ['period_expenses','net_profit'].map(profitRow).join('')+(SUM_SCOPE==='month'?changes:'')+
+    '<details><summary>展开利润构成</summary>'+['selling_expenses','administrative_expenses','financial_expenses','business_taxes','investment_income','operating_profit','nonoperating_income','nonoperating_expenses','total_profit','income_tax_expense'].map(profitRow).join('')+'</details>'+
+    '<div class="summary-note">'+escapeHTML(s.completeness_note)+'</div><button class="ghost small" onclick="summaryReport(\'is\')">完整利润表</button></div>';
+  const funds = '<div class="'+(expanded?'card':'')+'"><div class="sum-group">💰 资金与往来</div>'+
+    row('期末账面资金',s.funds.closing,'bs:monetary_funds')+
+    row('本月资金变化',s.funds.month.change)+row('本年资金变化',s.funds.year_to_date.change)+
+    row((SUM_SCOPE==='month'?'本月':'本年')+'经营现金净额',s.funds[SUM_SCOPE].operating_net)+
+    '<details><summary>展开现金、银行及其他资金</summary>'+s.funds.components.map(r=>row(r.label,r.value)).join('')+'</details>'+
+    s.working_capital.slice(0,2).map(r=>row(r.label,r.value,'bs:'+r.key)).join('')+
+    '<details><summary>展开预收预付及其他往来</summary>'+s.working_capital.slice(2).map(r=>row(r.label,r.value,'bs:'+r.key)).join('')+'</details>'+
+    '<div class="summary-note">账面余额不是银行实时可用余额。其他应付款可查看垫款、借款等明细；尚未按到期日核销，不判断逾期。</div>'+
+    '<button class="ghost small" onclick="summaryReport(\'cf\')">现金流量表</button> <button class="ghost small" onclick="summaryReport(\'tpl\')">检查报表映射</button></div>';
+  return '<div class="summary-box '+(expanded?'overview-grid':'')+'">'+overview+profit+funds+'</div>';
+}
+function paintSummary() {
+  if (!SUM_DATA || SUM_DATA.book_id !== BOOK.id || SUM_DATA.period !== PERIOD) return;
+  $('rp_summary').innerHTML = summaryMarkup(SUM_DATA);
+  if(currentView==='overview' && $('overview_body')) $('overview_body').innerHTML = summaryMarkup(SUM_DATA,true);
+}
+function renderOverview() {
+  $('mainArea').innerHTML = '<h3 class="view-title">📈 经营与资金</h3><div id="overview_body">加载中…</div>';
+  paintSummary(); loadSummary();
+}
+async function loadSummary() {
+  const request=++SUM_REQUEST, bookId=BOOK.id, period=PERIOD;
   try {
-    const reminders = await api('/api/tax/reminders?within_days=30');
-    $('rp_reminders').innerHTML = reminders.length
-      ? reminders.map(r2 => `<div class="remind">${r2.due_date}<br>${r2.tax}</div>`).join('')
-      : '<div class="result">30 天内无征期</div>';
-  } catch (e) { $('rp_reminders').textContent = '加载失败'; }
+    const s=await api('/api/reports/period-summary?book_id='+bookId+'&period='+period);
+    if(request!==SUM_REQUEST || BOOK.id!==bookId || PERIOD!==period) return;
+    SUM_DATA=s; paintSummary();
+  } catch(e) {
+    if(request!==SUM_REQUEST || BOOK.id!==bookId || PERIOD!==period) return;
+    SUM_DATA=null;
+    const html='<div class="summary-note">概要待检查：'+escapeHTML(e.message)+'</div><button class="ghost small" onclick="summaryReport(\'tpl\')">检查报表映射</button>';
+    $('rp_summary').innerHTML=html;
+    if(currentView==='overview' && $('overview_body')) $('overview_body').innerHTML=html;
+  }
+}
+async function openSummaryDetail(key,offset=0) {
+  currentView='overview'; updateNav();
+  const request=++DETAIL_REQUEST, bookId=BOOK.id, period=PERIOD, scope=SUM_SCOPE;
+  $('mainArea').innerHTML='<h3 class="view-title"><button class="ghost small" onclick="renderOverview()">← 经营与资金</button></h3><div id="summary_detail_body">加载中…</div>';
+  const target=$('summary_detail_body');
+  try {
+    const r=await api('/api/reports/summary-detail?'+new URLSearchParams({book_id:bookId,period,key,scope,offset}));
+    if(request!==DETAIL_REQUEST || BOOK.id!==bookId || PERIOD!==period || !target.isConnected) return;
+    target.innerHTML='<h3>'+escapeHTML(r.label)+'</h3><div class="summary-note">'+r.period_from+' 至 '+r.period_to+' · '+escapeHTML(r.note)+'</div>'+
+      (r.opening==null?'':'<div>建账期初余额：'+sumMoney(r.opening)+'</div>')+
+      r.rows.map(v=>'<div class="summary-detail"><button class="ghost small" onclick="viewVoucher('+v.voucher_id+')">记字第'+v.voucher_no+'号</button> '+escapeHTML(v.date)+
+        '<div>'+escapeHTML(v.summary)+'</div><div class="summary-note">'+escapeHTML(v.account_code)+' '+escapeHTML(acctLabel(v.account_code))+' '+escapeHTML(v.contact_name||'')+'</div>'+
+        '<div>借方 '+sumMoney(v.debit)+' ｜ 贷方 '+sumMoney(v.credit)+'</div></div>').join('')+
+      (!r.rows.length?'<div class="summary-note">此范围暂无已过账分录。</div>':'')+
+      '<div class="chips">'+(offset>0?'<button class="ghost small" onclick="openSummaryDetail(\''+key+'\','+Math.max(0,offset-50)+')">上一页</button>':'')+
+      (offset+r.rows.length<r.total?'<button class="ghost small" onclick="openSummaryDetail(\''+key+'\','+(offset+50)+')">下一页</button>':'')+'<span class="summary-note">共 '+r.total+' 条分录</span></div>';
+  } catch(e) { if(target.isConnected && BOOK.id===bookId && PERIOD===period) target.textContent='加载失败：'+e.message; }
+}
+function calendarFrequency() { return localStorage.getItem('ledger_calendar_frequency_'+BOOK.id)==='monthly'?'monthly':'quarterly'; }
+function changeCalendarFrequency(value) { localStorage.setItem('ledger_calendar_frequency_'+BOOK.id,value); loadReminders(); renderTax(); }
+function reminderMarkup(r) {
+  const source=r.source_url==='https://fgk.chinatax.gov.cn/zcfgk/c102424/c5245729/content.html' ? '<a class="link" target="_blank" rel="noopener" href="'+r.source_url+'">官方依据</a>' : '';
+  return '<div class="summary-detail"><b>'+escapeHTML(r.due_date)+(r.deadline_status==='official'?'':'（预计）')+'</b><br>'+escapeHTML(r.tax)+'<div class="summary-note">所属期 '+escapeHTML(r.period)+'<br>'+escapeHTML(r.deadline_note)+' '+source+'</div></div>';
+}
+async function loadReminders() {
+  const bookId=BOOK.id, frequency=calendarFrequency();
+  try {
+    const reminders=await api('/api/tax/reminders?'+new URLSearchParams({within_days:30,book_id:bookId,vat_frequency:frequency}));
+    if(BOOK.id!==bookId || frequency!==calendarFrequency()) return;
+    $('rp_reminders').innerHTML=(reminders.length?reminders.map(reminderMarkup).join(''):'<div class="summary-note">30天内暂无本日历覆盖的事项。</div>')+
+      '<button class="ghost small" onclick="switchView(\'tax\')">核对申报频率与事项</button>';
+  } catch(e) { if(BOOK.id===bookId) $('rp_reminders').textContent='提醒加载失败'; }
 }
 
-async function loadSummary() {
-  try {
-    const s = await api(`/api/reports/period-summary?book_id=${BOOK.id}&period=${PERIOD}`);
-    const v = s.voucher_status;
-    const kv = (label, val) => `<div class="kv"><span>${label}</span><b>${val ?? '0.00'}</b></div>`;
-    const kvLink = (label, status, n) => `<div class="kv"><span>${label}</span><b class="chip-link" title="点击查看凭证" onclick="jumpVoucherStatus('${status}')">${n}</b></div>`;
-    $('rp_summary').innerHTML = `
-      <div class="sum-group">📄 凭证状态</div>
-      ${kvLink('草稿', 'draft', v.draft)}
-      ${kvLink('待审核', 'submitted', v.submitted)}
-      ${kvLink('已审核', 'audited', v.audited)}
-      ${kvLink('已过账', 'posted', v.posted)}
-      <div class="sum-group">📈 本期经营</div>
-      ${kv('营业收入', s.operating_revenue)}
-      ${kv('净利润', s.net_profit)}
-      <div class="sum-group">💰 资金与往来</div>
-      ${kv('货币资金', s.monetary_funds)}
-      ${kv('应收账款', s.accounts_receivable)}
-      ${kv('应付账款', s.accounts_payable)}`;
-  } catch (e) { $('rp_summary').textContent = '加载失败'; }
-}
 function jumpVoucherStatus(status) {
   V_STATUS = status; V_PERIOD = PERIOD; V_SEL.clear(); V_MSG = '';
   switchView('vouchers');

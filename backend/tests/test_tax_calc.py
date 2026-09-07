@@ -105,7 +105,8 @@ def test_cit_small_micro_preferential(client, auth_headers, db_session, book, ma
     result = client.get(
         "/api/tax/cit",
         headers=auth_headers,
-        params={"book_id": book.id, "year": 2026, "quarter": 3, "employees": 5, "assets": 100000},
+        params={"book_id": book.id, "year": 2026, "quarter": 3, "employees": 5, "assets": 100000,
+                "industry_eligible": True, "adjustments_confirmed": True},
     ).json()
 
     assert result["profit_ytd"] == "39504.95"
@@ -237,3 +238,117 @@ def test_tax_export_workbook(client, auth_headers, book):
     assert "申报日历" in workbook.sheetnames
     values = {row[0]: row[1] for row in workbook["增值税"].iter_rows(values_only=True) if row[0]}
     assert values["应纳增值税额"] == "495.05"
+
+def test_calendar_2026_holidays_periods_and_year_boundary():
+    from datetime import date
+    entries = tax_calendar.filing_calendar(2026)
+    q3 = next(r for r in entries if r["period"] == "2026Q3" and r["tax"].startswith("增值税"))
+    assert q3["due_date"] == "2026-10-26"
+    assert q3["deadline_status"] == "official" and q3["source_url"]
+    wage = next(r for r in entries if r["period"] == "2026-08" and r["tax"].startswith("个人"))
+    assert wage["due_date"] == "2026-09-15"
+    january = tax_calendar.upcoming_reminders(31, date(2026, 1, 1))
+    assert any(r["period"] == "2025Q4" and r["due_date"] == "2026-01-20" for r in january)
+    future = tax_calendar.filing_calendar(2028)
+    assert all(r["deadline_status"] == "unverified" and r["source_url"] is None for r in future)
+    monthly = tax_calendar.filing_calendar(2026, vat_frequency="monthly", entity_type="individual")
+    assert sum(r["tax"].startswith("增值税") for r in monthly) == 12
+    assert not any("企业所得税" in r["tax"] for r in monthly)
+    assert not any("营业账簿" in r["tax"] or "财务报表" in r["tax"] for r in entries)
+
+
+def test_cit_missing_inputs_are_unknown(client, auth_headers, book):
+    result = client.get("/api/tax/cit", headers=auth_headers,
+                        params={"book_id": book.id, "year": 2026, "quarter": 3}).json()
+    assert result["status"] == "pending"
+    assert result["preferential"] is None
+    assert result["conditions"]["employees_within_limit"] is None
+    assert result["conditions"]["assets_within_limit"] is None
+    assert result["prepaid_this"] is None and result["actual_rate"] is None
+
+
+def test_cit_uses_pretax_profit_and_adjustment(client, auth_headers, db_session, book,
+                                             mama_user, auditor_user, post_flow, contacts_pair):
+    _post_simple_vouchers(db_session, book, mama_user, auditor_user, post_flow, contacts_pair)
+    tax = voucher_service.create_voucher(
+        db_session, book_id=book.id, voucher_date="2026-08-31", operator_id=mama_user.id, attachment_count=1,
+        lines=[{"summary": "计提所得税", "account_code": "5801", "debit": "2000", "credit": "0"},
+               {"summary": "应交所得税", "account_code": "2221", "debit": "0", "credit": "2000"}])
+    post_flow(tax, mama_user, auditor_user)
+    params = {"book_id": book.id, "year": 2026, "quarter": 3, "employees": "5.5", "assets": "100000",
+              "industry_eligible": True, "adjustments_confirmed": True, "adjustment_net": "-1000", "prepaid_prev": "500"}
+    response = client.get("/api/tax/cit", headers=auth_headers, params=params)
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["profit_ytd"] == "39504.95"
+    assert result["net_profit_ytd"] == "37504.95"
+    assert result["actual_profit"] == "38504.95"
+    assert result["tax_total_ytd"] == "1925.25"
+    assert result["prepaid_this"] == "1425.25"
+    from io import BytesIO
+    from openpyxl import load_workbook
+    exported = client.get("/api/tax/export", headers=auth_headers, params=params)
+    assert exported.status_code == 200
+    sheet = load_workbook(BytesIO(exported.content))["企业所得税"]
+    values = dict(sheet.iter_rows(values_only=True))
+    assert values["本期估算预缴"] == result["prepaid_this"]
+
+
+def test_cit_unsupported_entity_and_policy(client, auth_headers, book, db_session):
+    params = {"book_id": book.id, "year": 2028, "quarter": 3, "employees": 1, "assets": 1000,
+              "industry_eligible": True, "adjustments_confirmed": True}
+    result = client.get("/api/tax/cit", headers=auth_headers, params=params).json()
+    assert result["status"] == "policy_unverified" and result["prepaid_this"] is None
+    book.entity_type = "individual"
+    db_session.commit()
+    params["year"] = 2026
+    result = client.get("/api/tax/cit", headers=auth_headers, params=params).json()
+    assert result["status"] == "not_applicable" and result["prepaid_this"] is None
+
+
+def test_cit_false_industry_and_loss(client, auth_headers, book):
+    params = {"book_id": book.id, "year": 2026, "quarter": 3, "employees": 1, "assets": 1000,
+              "industry_eligible": False, "adjustments_confirmed": True, "adjustment_net": "10000"}
+    result = client.get("/api/tax/cit", headers=auth_headers, params=params).json()
+    assert result["preferential"] is False and result["tax_total_ytd"] == "2500.00"
+    params.update(industry_eligible=True, adjustment_net="-10000")
+    result = client.get("/api/tax/cit", headers=auth_headers, params=params).json()
+    assert result["preferential"] is True and result["prepaid_this"] == "0.00"
+
+
+def test_cit_invalid_input_and_tax_book_access(client, auth_headers, book, db_session, mama_user):
+    base = {"book_id": book.id, "year": 2026, "quarter": 3}
+    for change in ({"quarter": 5}, {"employees": -1}, {"assets": "NaN"}, {"prepaid_prev": "Infinity"}):
+        assert client.get("/api/tax/cit", headers=auth_headers, params={**base, **change}).status_code == 422
+    from app.ledger.book_service import create_book
+    other = create_book(db_session, name="独立测试账套", start_period="2026-08")
+    token = client.post("/api/auth/login", json={"username": mama_user.username, "password": "mama123456"}).json()["access_token"]
+    headers = {"Authorization": "Bearer " + token}
+    for endpoint in ("cit", "reminders", "calendar", "export"):
+        assert client.get("/api/tax/" + endpoint, headers=headers, params={**base, "book_id": other.id}).status_code == 403
+
+
+def test_tax_export_pending_is_not_zero(client, auth_headers, book):
+    from io import BytesIO
+    from openpyxl import load_workbook
+    response = client.get("/api/tax/export", headers=auth_headers,
+                          params={"book_id": book.id, "year": 2026, "quarter": 3})
+    wb = load_workbook(BytesIO(response.content))
+    values = dict(wb["企业所得税"].iter_rows(values_only=True))
+    assert values["小微优惠"] == "待核对" and values["本期估算预缴"] == "待核对"
+    assert wb["申报日历"].cell(1, 6).value == "官方来源"
+
+
+def test_cit_dirty_mapping_and_general_export_blocked(client, auth_headers, book, db_session):
+    from app.models.report import ReportTemplate
+    params = {"book_id": book.id, "year": 2026, "quarter": 3}
+    book.taxpayer_type = "general"
+    db_session.commit()
+    assert client.get("/api/tax/export", headers=auth_headers, params=params).status_code == 400
+    book.taxpayer_type = "small_scale"
+    row = db_session.query(ReportTemplate).filter_by(book_id=book.id, report="is", key="operating_revenue").one()
+    row.formula = '[["9999", 1]]'
+    db_session.commit()
+    for endpoint in ("cit", "export"):
+        result = client.get("/api/tax/" + endpoint, headers=auth_headers, params=params)
+        assert result.status_code == 400 and "映射" in result.json()["detail"]

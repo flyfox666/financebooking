@@ -33,6 +33,9 @@ def export_tax_workbook(
     quarter: int,
     book_name: str,
     unissued_income: Decimal = Decimal("0"),
+    cit_inputs: dict | None = None,
+    vat_frequency: str = "quarterly",
+    entity_type: str = "company",
 ) -> bytes:
     workbook = Workbook()
     summary = workbook.active
@@ -71,18 +74,21 @@ def export_tax_workbook(
         ],
     )
 
-    cit = calc_cit(db, book_id=book_id, year=year, quarter=quarter)
+    cit = calc_cit(db, book_id=book_id, year=year, quarter=quarter, **(cit_inputs or {}))
     _kv_sheet(
         workbook,
         "企业所得税",
         [
             ("本年累计利润总额", cit["profit_ytd"]),
-            ("计税基础", cit["taxable_base"]),
-            ("小微优惠", "是" if cit["preferential"] else "否"),
-            ("实际税负", cit["actual_rate"]),
-            ("本年累计应纳所得税", cit["tax_total_ytd"]),
+            ("核对状态", {"pending": "资料待核对", "estimated": "已核对输入的辅助估算", "not_applicable": "不适用", "policy_unverified": "政策待核验"}[cit["status"]]),
+            ("预缴调整净额", cit["adjustment_net"]),
+            ("计税基础", cit["taxable_base"] or "待核对"),
+            ("小微优惠", "待核对" if cit["preferential"] is None else ("是" if cit["preferential"] else "否")),
+            ("估算税负", cit["actual_rate"] or "待核对"),
+            ("本年累计估算所得税", cit["tax_total_ytd"] or "待核对"),
             ("前期已预缴", cit["prepaid_prev"]),
-            ("本期应预缴", cit["prepaid_this"]),
+            ("本期估算预缴", cit["prepaid_this"] or "待核对"),
+            ("说明", "；".join(cit["hints"])),
         ],
     )
 
@@ -102,11 +108,12 @@ def export_tax_workbook(
         ],
     )
 
-    cal = tax_calendar.filing_calendar(year)
+    cal = tax_calendar.filing_calendar(year, vat_frequency=vat_frequency, entity_type=entity_type)
     ws = workbook.create_sheet("申报日历")
-    ws.append(["截止日期", "税种", "所属期", "说明"])
+    ws.append(["截止或预计日期", "税种", "所属期", "说明", "期限状态", "官方来源"])
     for entry in cal:
-        ws.append([entry["due_date"], entry["tax"], entry["period"], entry["description"]])
+        ws.append([entry["due_date"], entry["tax"], entry["period"], entry["description"], entry["deadline_note"], entry["source_url"]])
+    ws.append([None, "印花税及财务报表报送", None, "期限请按主管税务机关认定及当地通知单独核对"])
 
     return _save(workbook)
 

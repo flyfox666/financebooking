@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Body, Depends, HTTPException, Response
+from typing import Literal
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_book_access
@@ -84,9 +86,28 @@ def get_income_statement(
 
 @router.get("/period-summary")
 def get_period_summary(
-    book_id: int, period: str, db: Session = Depends(get_db), user: User = Depends(require_book_access)
+    book_id: int, period: str = Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$"), db: Session = Depends(get_db), user: User = Depends(require_book_access)
 ):
-    return report_service.period_summary(db, book_id=book_id, period=period)
+    from app.ledger.exceptions import LedgerError
+    try:
+        return report_service.period_summary(db, book_id=book_id, period=period)
+    except (LedgerError, KeyError) as exc:
+        raise HTTPException(400, detail="概要取数失败，请检查报表映射：" + str(exc))
+
+
+@router.get("/summary-detail")
+def get_summary_detail(
+    book_id: int, key: str,
+    period: str = Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    scope: Literal["month", "year_to_date"] = "month",
+    offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db), user: User = Depends(require_book_access),
+):
+    from app.ledger.exceptions import LedgerError
+    try:
+        return report_service.summary_detail(db, book_id=book_id, period=period, key=key, scope=scope, offset=offset, limit=limit)
+    except LedgerError as exc:
+        raise HTTPException(400, detail=str(exc))
 
 
 @router.get("/template-check")

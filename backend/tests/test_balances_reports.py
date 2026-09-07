@@ -149,3 +149,67 @@ def test_trial_balance_unposted_not_merged(db_session, mock_month, book, mama_us
     # 已过账三栏仍平衡
     report = balances.trial_balance(db_session, book_id=book.id, period="2026-08", unposted="pending")
     assert report["is_balanced"] is True
+
+def test_expanded_summary_matches_reports_and_cash(client, auth_headers, db_session, mock_month, book):
+    from decimal import Decimal
+    from app.ledger.report_service import income_statement
+    response = client.get("/api/reports/period-summary", headers=auth_headers,
+                          params={"book_id": book.id, "period": "2026-08"})
+    assert response.status_code == 200, response.text
+    summary = response.json()
+    metrics = {r["key"]: r for r in summary["profit_metrics"]}
+    original = {r["key"]: r for r in income_statement(db_session, book_id=book.id, period="2026-08")["rows"]}
+    for key in original:
+        assert metrics[key]["month"] == original[key]["month"]
+        assert metrics[key]["year_to_date"] == original[key]["year_to_date"]
+    assert Decimal(metrics["gross_profit"]["month"]) == Decimal(metrics["operating_revenue"]["month"]) - Decimal(metrics["operating_cost"]["month"])
+    assert summary["funds"]["closing"] == summary["monetary_funds"]
+    assert metrics["net_profit"]["month_change"] is None  # 建账前无可比数据
+    assert not any("映射待检查" in w for w in summary["warnings"])
+
+
+def test_summary_details_posted_only_and_pagination(client, auth_headers, db_session, mock_month, book,
+                                                    mama_user, auditor_user):
+    draft = _make_unposted(db_session, book, mama_user, auditor_user, "5602.01", "123.45", "draft")
+    params = {"book_id": book.id, "period": "2026-08", "key": "is:net_profit", "limit": 2}
+    first = client.get("/api/reports/summary-detail", headers=auth_headers, params=params)
+    assert first.status_code == 200, first.text
+    data = first.json()
+    assert data["total"] > 2 and len(data["rows"]) == 2
+    assert all(r["voucher_id"] != draft.id for r in data["rows"])
+    second = client.get("/api/reports/summary-detail", headers=auth_headers, params={**params, "offset": 2}).json()
+    assert data["rows"] != second["rows"]
+    summary = client.get("/api/reports/period-summary", headers=auth_headers,
+                         params={"book_id": book.id, "period": "2026-08"}).json()
+    assert summary["unposted_ytd"] >= 1
+    assert client.get("/api/reports/summary-detail", headers=auth_headers,
+                      params={**params, "key": "is:injected"}).status_code == 400
+
+
+def test_summary_mapping_missing_account_is_not_zero(client, auth_headers, db_session, book):
+    from app.models.report import ReportTemplate
+    row = db_session.query(ReportTemplate).filter_by(book_id=book.id, report="is", key="operating_revenue").one()
+    row.formula = '[["9999", 1]]'
+    db_session.commit()
+    response = client.get("/api/reports/period-summary", headers=auth_headers,
+                          params={"book_id": book.id, "period": "2026-08"})
+    assert response.status_code == 200, response.text
+    data = response.json()
+    metrics = {r["key"]: r for r in data["profit_metrics"]}
+    assert metrics["operating_revenue"]["month"] is None and metrics["net_profit"]["month"] is None
+    assert data["gross_margin"]["month"] is None
+
+
+def test_summary_empty_period_and_access(client, auth_headers, db_session, book, mama_user):
+    data = client.get("/api/reports/period-summary", headers=auth_headers,
+                      params={"book_id": book.id, "period": "2026-08"}).json()
+    assert data["gross_margin"]["month"] is None
+    from app.ledger.book_service import create_book
+    other = create_book(db_session, name="隔离概要测试", start_period="2026-08")
+    token = client.post("/api/auth/login", json={"username": mama_user.username, "password": "mama123456"}).json()["access_token"]
+    for endpoint in ("period-summary", "summary-detail"):
+        response = client.get("/api/reports/" + endpoint, headers={"Authorization": "Bearer " + token},
+                              params={"book_id": other.id, "period": "2026-08", "key": "is:net_profit"})
+        assert response.status_code == 403
+    assert client.get("/api/reports/period-summary", headers=auth_headers,
+                      params={"book_id": book.id, "period": "2026-13"}).status_code == 422
