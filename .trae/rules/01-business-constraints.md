@@ -15,8 +15,8 @@ description: 有数 LedgerAI 项目业务硬约束。始终生效：所有对话
 
 ### 凭证与权限
 - **AI 无过账/审核权限**，候选凭证必须经用户确认才落账；工具白名单仅查询 + ask_user。
-- 手工凭证 `source=manual` 必须至少附 1 张原始单据，否则 400 拦截。
-- 过账/冲销凭证的附件**锁定不可删**，仅草稿/待审/已审三态可编辑。
+- 手工凭证先存草稿再上传原件；提交/审核/过账时必须有真实附件且 SHA256 正确，填数量不能绕过。制单人及所有修改人不能审核。
+- 过账/冲销凭证的附件**锁定不可删**，仅草稿/待审/已审三态可由制单岗或管理员编辑；增删后退回草稿重审。
 - 删除附件 = 磁盘文件 `unlink()` + 数据库记录真删 + 重新 recount 凭证附件数。
 - 凭证显示：科目编码与科目名称分两列；附件默认隐藏，头部按钮弹窗打开。
 
@@ -25,7 +25,7 @@ description: 有数 LedgerAI 项目业务硬约束。始终生效：所有对话
 - 现金流量：`voucher_line.cf_item` 行级标注优先（一张凭证可拆多个流量项），未标注走对方最大行科目兜底。
 
 ### 环境边界
-- 只操作 `d:\traecnproject\financebooking`，**严禁碰** `d:\codexproject\financebooking`。
+- 当前工作目录是 `D:\codexproject\financebooking`，旧环境禁令是复制遗留。仅使用 docker-compose.test.yml 的 ledgerai-codex-test:18000 与独立卷；旧容器及财务卷保持隔离。
 - 部署服务统一走 Docker Compose，不用全局 Python（缺依赖）。
 - 浏览器自动化只用 Trae 内置 `agent-browser` Skill，**禁装** Playwright/Puppeteer/Selenium。
 - 中国企业数据先 `search_companies` 锚定再查天眼查 MCP，禁止编造。

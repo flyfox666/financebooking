@@ -35,6 +35,10 @@ def db_session(engine):
 
 @pytest.fixture()
 def client(engine, db_session, monkeypatch):
+    import asyncio
+    async def no_real_backup():
+        await asyncio.Event().wait()
+    monkeypatch.setattr('app.main.backup_scheduler', no_real_backup)
     monkeypatch.setattr("app.main.run_migrations", lambda: None)
     monkeypatch.setattr("app.main.seed_llm_provider", lambda: None)
     # seed_default_admin 走 SessionLocal()（真实库），测试用内存库必须一并 stub，
@@ -116,8 +120,9 @@ def auth_headers(client, admin_user):
 
 
 @pytest.fixture()
-def post_flow(db_session):
+def post_flow(db_session, attachments_dir):
     def _run(voucher, preparer, auditor):
+        attach_original(db_session, voucher, preparer.id)
         voucher_service.submit_voucher(db_session, voucher_id=voucher.id, operator_id=preparer.id)
         voucher_service.audit_voucher(db_session, voucher_id=voucher.id, operator=auditor)
         voucher_service.post_voucher(db_session, voucher_id=voucher.id, operator=auditor)
@@ -182,13 +187,21 @@ def mock_month_with_carryover(db_session, mock_month, book, mama_user, auditor_u
     return {"vouchers": mock_month, "carryovers": drafts}
 
 
-@pytest.fixture()
+@pytest.fixture(autouse=True)
 def attachments_dir(tmp_path, monkeypatch):
     from app.core.config import get_settings
 
     target = tmp_path / "attachments"
     monkeypatch.setattr(get_settings(), "ATTACHMENTS_DIR", str(target))
     return target
+
+
+def attach_original(db, voucher, operator_id):
+    """Lifecycle fixtures include a real synthetic original, just like production intake."""
+    from app.ledger.attachment_service import save_attachment, list_attachments
+    if voucher.source == 'manual' and not list_attachments(db, voucher.id):
+        save_attachment(db, voucher=voucher, content=b'Synthetic test source document',
+                        original_filename='test-source.txt', content_type='text/plain', operator_id=operator_id)
 
 
 @pytest.fixture()

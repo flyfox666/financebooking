@@ -6,6 +6,7 @@ from app.ledger import voucher_service
 from app.ledger.exceptions import VoucherError
 from app.ledger.mock_data import expected_posted_net, voucher_payloads
 from app.models.voucher import Voucher
+from tests.conftest import attach_original
 
 BALANCED = [
     {"summary": "收到服务费", "account_code": "1002", "debit": "11300.00", "credit": "0"},
@@ -55,6 +56,7 @@ def test_state_machine_guards(db_session, book, mama_user, auditor_user):
     )
     with pytest.raises(VoucherError, match="待审核"):
         voucher_service.audit_voucher(db_session, voucher_id=voucher.id, operator=auditor_user)
+    attach_original(db_session, voucher, mama_user.id)
     voucher_service.submit_voucher(db_session, voucher_id=voucher.id, operator_id=mama_user.id)
     with pytest.raises(VoucherError, match="同一人"):
         voucher_service.audit_voucher(db_session, voucher_id=voucher.id, operator=mama_user)
@@ -90,6 +92,7 @@ def test_delete_only_draft(db_session, book, mama_user, auditor_user):
         operator_id=mama_user.id,
         attachment_count=1,
     )
+    attach_original(db_session, posted, mama_user.id)
     voucher_service.submit_voucher(db_session, voucher_id=posted.id, operator_id=mama_user.id)
     voucher_service.audit_voucher(db_session, voucher_id=posted.id, operator=auditor_user)
     voucher_service.post_voucher(db_session, voucher_id=posted.id, operator=auditor_user)

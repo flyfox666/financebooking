@@ -48,6 +48,7 @@ def test_full_http_flow(client, book, admin_user, mama_user, auditor_user, conta
     assert data["total_debit"] == "11300.00"
     assert data["lines"][0]["debit"] == "11300.00"
 
+    _upload_original(client, voucher_id, mama_h)
     resp = client.post(f"/api/vouchers/{voucher_id}/submit", headers=mama_h)
     assert resp.status_code == 200
     assert resp.json()["status"] == "submitted"
@@ -83,6 +84,7 @@ def test_creator_cannot_self_audit(client, book, admin_user, mama_user, auditor_
         "/api/vouchers", params={"book_id": book.id}, headers=admin_h, json=income_payload(contacts_pair)
     )
     voucher_id = resp.json()["id"]
+    _upload_original(client, voucher_id, admin_h)
     client.post(f"/api/vouchers/{voucher_id}/submit", headers=admin_h)
     resp = client.post(f"/api/vouchers/{voucher_id}/audit", headers=admin_h)
     assert resp.status_code == 400
@@ -124,6 +126,7 @@ def test_patch_and_delete_draft_only(client, book, admin_user, mama_user, audito
         "/api/vouchers", params={"book_id": book.id}, headers=mama_h, json=income_payload(contacts_pair)
     )
     posted_id = resp.json()["id"]
+    _upload_original(client, posted_id, mama_h)
     client.post(f"/api/vouchers/{posted_id}/submit", headers=mama_h)
     client.post(f"/api/vouchers/{posted_id}/audit", headers=papa_h)
     client.post(f"/api/vouchers/{posted_id}/post", headers=papa_h)
@@ -143,6 +146,7 @@ def test_reverse_endpoint(client, book, admin_user, mama_user, auditor_user, get
         "/api/vouchers", params={"book_id": book.id}, headers=mama_h, json=income_payload(contacts_pair)
     )
     voucher_id = resp.json()["id"]
+    _upload_original(client, voucher_id, mama_h)
     client.post(f"/api/vouchers/{voucher_id}/submit", headers=mama_h)
     client.post(f"/api/vouchers/{voucher_id}/audit", headers=papa_h)
     client.post(f"/api/vouchers/{voucher_id}/post", headers=papa_h)
@@ -158,7 +162,7 @@ def test_reverse_endpoint(client, book, admin_user, mama_user, auditor_user, get
     assert red["reverses_voucher_id"] == voucher_id
 
     red_id = red["id"]
-    client.post(f"/api/vouchers/{red_id}/submit", headers=papa_h)
+    client.post(f"/api/vouchers/{red_id}/submit", headers=mama_h)
     client.post(f"/api/vouchers/{red_id}/audit", headers=admin_h)
     client.post(f"/api/vouchers/{red_id}/post", headers=papa_h)
 
@@ -178,6 +182,7 @@ def test_carryover_endpoint(
         "/api/vouchers", params={"book_id": book.id}, headers=mama_h, json=income_payload(contacts_pair)
     )
     voucher_id = resp.json()["id"]
+    _upload_original(client, voucher_id, mama_h)
     client.post(f"/api/vouchers/{voucher_id}/submit", headers=mama_h)
     client.post(f"/api/vouchers/{voucher_id}/audit", headers=papa_h)
     client.post(f"/api/vouchers/{voucher_id}/post", headers=papa_h)
@@ -212,6 +217,7 @@ def _create(client, headers, book_id, contacts_pair):
         "/api/vouchers", params={"book_id": book_id}, headers=headers, json=income_payload(contacts_pair)
     )
     assert resp.status_code == 201, resp.text
+    _upload_original(client, resp.json()["id"], headers)
     return resp.json()["id"]
 
 
@@ -270,3 +276,9 @@ def test_batch_partial_failure_and_delete(client, book, admin_user, mama_user, a
     data = resp.json()
     assert data["ok"] == [draft_id]
     assert {f["id"] for f in data["failed"]} == {submitted_id}
+
+
+def _upload_original(client, voucher_id, headers):
+    response = client.post(f'/api/vouchers/{voucher_id}/attachments', headers=headers,
+        files={'file': ('synthetic.txt', b'Synthetic original', 'text/plain')})
+    assert response.status_code == 201, response.text

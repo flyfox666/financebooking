@@ -47,7 +47,7 @@ def test_parse_and_suggest_and_confirm_full_flow(
     )
     assert suggest_resp.status_code == 200, suggest_resp.text
     suggestion = suggest_resp.json()
-    assert suggestion["confidence"] == 0.9
+    assert suggestion["confidence"] is None
     assert suggestion["voucher"]["lines"][0]["debit"] == "11300.00"
 
     confirm_lines = suggestion["voucher"]["lines"]
@@ -81,7 +81,7 @@ def test_parse_and_suggest_and_confirm_full_flow(
     assert docs[0]["status"] == "confirmed"
 
 
-def test_confirm_twice_rejected(client, auth_headers, book, mama_user, monkeypatch, db_session):
+def test_confirm_retry_is_idempotent(client, auth_headers, book, mama_user, monkeypatch, db_session):
     parse_resp = _upload_xml(client, auth_headers, book)
     doc_id = parse_resp.json()["doc_id"]
     monkeypatch.setattr(
@@ -100,8 +100,15 @@ def test_confirm_twice_rejected(client, auth_headers, book, mama_user, monkeypat
             {"summary": "b", "account_code": "5603", "debit": "0", "credit": "10.00"},
         ],
     }
-    assert client.post("/api/ai/confirm", headers=auth_headers, json=body).status_code == 201
-    assert client.post("/api/ai/confirm", headers=auth_headers, json=body).status_code == 400
+    risk = client.post('/api/ai/confirm', headers=auth_headers, json=body)
+    assert risk.status_code == 409
+    body.update(risk_fingerprint=risk.json()['detail']['risk_fingerprint'], risk_reason='已核对差额情况')
+    first = client.post('/api/ai/confirm', headers=auth_headers, json=body)
+    second = client.post('/api/ai/confirm', headers=auth_headers, json=body)
+    assert first.status_code == second.status_code == 201
+    assert first.json()['id'] == second.json()['id']
+    body['lines'][0]['summary'] = 'different request'
+    assert client.post('/api/ai/confirm', headers=auth_headers, json=body).status_code == 400
 
 
 def test_discard_document(client, auth_headers, book):

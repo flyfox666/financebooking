@@ -24,7 +24,7 @@ from app.api import (
     users,
     vouchers,
 )
-from app.core.backup import run_backup_now
+from app.core.backup import run_full_backup
 from app.core.database import SessionLocal
 
 BACKUP_HOUR = 3
@@ -56,6 +56,8 @@ def seed_llm_provider() -> None:
 
     with SessionLocal() as db:
         seed_from_env(db)
+        from app.core.model_secrets import migrate_credentials
+        migrate_credentials(db)
 
 
 def seed_default_admin() -> None:
@@ -85,6 +87,15 @@ def seed_default_admin() -> None:
 
 
 async def backup_scheduler():
+    from app.core.config import get_settings
+    import logging
+    # Catch up once after startup, including desktop users who shut down overnight.
+    status_file = Path(get_settings().BACKUP_DIR) / 'status.json'
+    if not status_file.exists() or datetime.fromtimestamp(status_file.stat().st_mtime).date() < datetime.now().date():
+        try:
+            await asyncio.to_thread(run_full_backup)
+        except Exception:
+            logging.getLogger(__name__).exception('Startup backup failed')
     while True:
         now = datetime.now()
         target = now.replace(hour=BACKUP_HOUR, minute=0, second=0, microsecond=0)
@@ -92,9 +103,9 @@ async def backup_scheduler():
             target += timedelta(days=1)
         await asyncio.sleep((target - now).total_seconds())
         try:
-            await asyncio.to_thread(run_backup_now)
+            await asyncio.to_thread(run_full_backup)
         except Exception:
-            pass
+            logging.getLogger(__name__).exception('Scheduled backup failed')
 
 
 @asynccontextmanager
@@ -136,11 +147,11 @@ app.include_router(ai.router)
 def settings_page():
     from fastapi.responses import FileResponse
 
-    return FileResponse(_static_dir() / "index.html")
+    return FileResponse(_static_dir() / "index.html", headers={'Cache-Control':'no-cache'})
 
 
 @app.get("/app", include_in_schema=False)
 def app_page():
     from fastapi.responses import FileResponse
 
-    return FileResponse(_static_dir() / "app.html")
+    return FileResponse(_static_dir() / "app.html", headers={'Cache-Control':'no-cache'})

@@ -119,7 +119,7 @@ def test_dup_invoice_only_counts_posted(db_session, book, mama_user, auditor_use
 
 
 def test_dup_already_confirmed_not_looping():
-    """历史消息已含重复警告 → 视为用户已确认，不再二次拦截（防死循环）。"""
+    """聊天内容不授权重复入账；必须对服务器风险指纹单独确认。"""
     plain = [
         {"role": "user", "content": "记一笔费用"},
         {"role": "assistant", "content": "已生成凭证草稿"},
@@ -131,4 +131,4 @@ def test_dup_already_confirmed_not_looping():
         {"role": "assistant", "content": f"⚠️ {DUP_WARN_MARK}：已存在相同金额的凭证……"},
         {"role": "user", "content": "确认入账"},
     ]
-    assert _dup_already_confirmed(warned) is True
+    assert _dup_already_confirmed(warned) is False

@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, func
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -9,7 +9,8 @@ from app.core.database import Base
 
 class Voucher(Base):
     __tablename__ = "voucher"
-    __table_args__ = (UniqueConstraint("book_id", "period", "voucher_no", name="uq_voucher_no"),)
+    __table_args__ = (UniqueConstraint("book_id", "period", "voucher_no", name="uq_voucher_no"),
+                      UniqueConstraint("reverses_voucher_id", name="uq_reversal_original"))
 
     id: Mapped[int] = mapped_column(primary_key=True)
     book_id: Mapped[int] = mapped_column(ForeignKey("book.id"), index=True)
@@ -26,6 +27,8 @@ class Voucher(Base):
     reverses_voucher_id: Mapped[int | None] = mapped_column(ForeignKey("voucher.id"), default=None)
     voided_by_voucher_id: Mapped[int | None] = mapped_column(ForeignKey("voucher.id"), default=None)
     created_by: Mapped[int] = mapped_column(ForeignKey("user.id"))
+    edited_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"), default=None)
+    editor_ids_json: Mapped[str] = mapped_column(Text, default='[]')
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     audited_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"), default=None)
     audited_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)

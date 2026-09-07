@@ -117,6 +117,7 @@
     <div data-view="users">👥 用户管理</div>
     <div data-view="aistyle">🧩 AI 偏好</div>
     <div data-view="llm">🤖 模型设置</div>
+    <div data-view="backup">💾 完整备份</div>
   </div>
 
   <div class="main" id="mainArea"></div>
@@ -183,7 +184,7 @@ async function boot() {
 
 function renderBookSwitch() {
   const sel = $('bookSwitch');
-  sel.innerHTML = BOOKS.map(b => `<option value="${b.id}"${b.id === BOOK.id ? ' selected' : ''}>${b.name}${b.taxpayer_type === 'general' ? '（一般纳税人）' : ''}</option>`).join('')
+  sel.innerHTML = BOOKS.map(b => `<option value="${b.id}"${b.id === BOOK.id ? ' selected' : ''}>${escapeHTML(b.name)}${b.taxpayer_type === 'general' ? '（一般纳税人）' : ''}</option>`).join('')
     + (ROLE === 'admin' ? '<option value="__new__">＋ 新建账套…</option>' : '');
   sel.value = String(BOOK.id);
 }
@@ -195,7 +196,7 @@ async function switchBook(bookId) {
   BOOK = target;
   localStorage.setItem('ledger_book', String(BOOK.id));
   // 账套隔离：清空 AI 对话历史（防 A 账套上下文泄入 B 账套会话）与主数据缓存
-  chatLog = [];
+  resetChatSession();
   ACCOUNTS = []; CONTACTS = []; TPL_CACHE = null; CHECKS_CACHE = null; TB_UNPOSTED = 'none';
   renderBookSwitch();
   loadPeriodForBook();
@@ -204,7 +205,7 @@ async function switchBook(bookId) {
     await loadMasters();
     await Promise.all([loadReminders(), loadSummary()]);
     switchView(currentView === 'llm' ? 'vouchers' : currentView);
-  } catch (e) { $('mainArea').innerHTML = `<div class="card" style="color:var(--danger)">切换失败：${e.message}</div>`; }
+  } catch (e) { $('mainArea').innerHTML = `<div class="card" style="color:var(--danger)">切换失败：${escapeHTML(e.message)}</div>`; }
 }
 
 function showNewBookForm(firstRun = false) {
@@ -240,7 +241,7 @@ async function createNewBook() {
     BOOKS.push(book);
     BOOK = book;
     localStorage.setItem('ledger_book', String(book.id));
-    chatLog = []; ACCOUNTS = []; CONTACTS = []; TPL_CACHE = null; CHECKS_CACHE = null;
+    resetChatSession(); ACCOUNTS = []; CONTACTS = []; TPL_CACHE = null; CHECKS_CACHE = null;
     renderBookSwitch();
     loadPeriodForBook();
     await loadMasters();
@@ -275,6 +276,7 @@ async function api(path, options = {}) {
 }
 
 function logout(expired) {
+  resetChatSession();
   localStorage.removeItem('ledger_token');
   TOKEN = '';
   $('mainView').classList.add('hidden');
@@ -324,10 +326,12 @@ function switchView(view) {
   currentView = view;
   updateNav();
   ({ chat: renderChat, vouchers: renderVouchers, accounts: renderAccounts, contacts: renderContactsView, tb: renderTB, reports: renderReports,
-     opening: renderOpening, invoices: renderInvoices, tax: renderTax, users: renderUsers, aistyle: renderAiStyle })[view]();
+     opening: renderOpening, invoices: renderInvoices, tax: renderTax, users: renderUsers, aistyle: renderAiStyle, backup: renderBackup })[view]();
 }
 
-function addBubble(html, cls = 'ai') {
+function escapeHTML(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function addBubble(html, cls = 'ai', trusted = false) {
+  if (!trusted) html = escapeHTML(html).replace(/\n/g, '<br>');
   chatLog.push({ html, cls });
   const wrap = document.createElement('div');
   wrap.className = 'bubble ' + cls;
@@ -345,7 +349,7 @@ function renderChat() {
   }
   $('mainArea').innerHTML = `
     <div class="chat-view">
-      <h3 class="view-title" style="flex:none">💬 记账助手</h3>
+      <h3 class="view-title" style="flex:none">💬 记账助手 <button class="small ghost" onclick="pendingDocuments()">待处理单据</button></h3>
       <div id="chatFlow" class="chat-flow"></div>
       <div class="chips" id="chips"></div>
       <div class="inputbar">
@@ -357,7 +361,9 @@ function renderChat() {
       </div>
     </div>`;
   const flow = $('chatFlow');
-  chatLog.forEach(m => { const div = document.createElement('div'); div.className = 'bubble ' + m.cls; div.innerHTML = m.html; flow.appendChild(div); });
+  chatLog.forEach(m => { const div = document.createElement('div'); div.className = 'bubble ' + m.cls;
+    const key=m.html.match(/data-card-key="(c\d+)"/)?.[1], state=key && cards.get(key);
+    div.innerHTML = state ? cardHTML(state.voucher,state.mode,key) : m.html; flow.appendChild(div); });
   flow.scrollTop = flow.scrollHeight;
   ['本月收入多少', '本月费用有哪些', '这个月利润', '看看余额表'].forEach(q => {
     const c = document.createElement('span');
@@ -374,7 +380,7 @@ function contactOptions(selected, allowedTypes) {
     c.is_active && (!allowedTypes || !allowedTypes.length || allowedTypes.includes(c.ctype)));
   return `<option value="">往来单位</option>` +
     usable.map(c =>
-      `<option value="${c.id}" ${Number(selected) === c.id ? 'selected' : ''}>${c.name}（${CTYPE_CN[c.ctype] || c.ctype}）</option>`).join('');
+      `<option value="${c.id}" ${Number(selected) === c.id ? 'selected' : ''}>${escapeHTML(c.name)}（${CTYPE_CN[c.ctype] || c.ctype}）</option>`).join('');
 }
 
 function auxTypesOf(accountCode) {
@@ -399,18 +405,18 @@ function cfSelectHTML(line, i, updFn) {
 function lineEditorHTML(lines, updFn, delFn) {
   return `<div class="vc-lines-box">` + lines.map((line, i) => `
     <div class="vc-line">
-      <input value="${line.summary || ''}" placeholder="摘要" onchange="${updFn}(${i},'summary',this.value)">
+      <input value="${escapeHTML(line.summary)}" placeholder="摘要" onchange="${updFn}(${i},'summary',this.value)">
       <select onchange="${updFn}(${i},'account_code',this.value)">
         <option value="">选择科目</option>
         ${ACCOUNTS.filter(a => a.is_active && a.is_leaf).map(a =>
-          `<option value="${a.code}" ${a.code === line.account_code ? 'selected' : ''}>${a.code} ${a.name}</option>`).join('')}
+          `<option value="${a.code}" ${a.code === line.account_code ? 'selected' : ''}>${a.code} ${escapeHTML(a.name)}</option>`).join('')}
       </select>
       <select onchange="${updFn}(${i},'contact_id',this.value?parseInt(this.value):null)">
         ${contactOptions(line.contact_id, auxTypesOf(line.account_code))}
       </select>
       ${cfSelectHTML(line, i, updFn)}
-      <input class="num" data-field="debit" value="${line.debit || ''}" placeholder="借方（按=平衡）" onchange="amtChange(this,'${updFn}',${i},'debit')" onkeydown="amtKey(event,this)">
-      <input class="num" data-field="credit" value="${line.credit || ''}" placeholder="贷方（按=平衡）" onchange="amtChange(this,'${updFn}',${i},'credit')" onkeydown="amtKey(event,this)">
+      <input class="num" data-field="debit" value="${escapeHTML(line.debit || '')}" placeholder="借方（按=平衡）" onchange="amtChange(this,'${updFn}',${i},'debit')" onkeydown="amtKey(event,this)">
+      <input class="num" data-field="credit" value="${escapeHTML(line.credit || '')}" placeholder="贷方（按=平衡）" onchange="amtChange(this,'${updFn}',${i},'credit')" onkeydown="amtKey(event,this)">
       <button class="small danger" onclick="${delFn}(${i})">×</button>
     </div>`).join('') + '</div>';
 }
@@ -451,30 +457,48 @@ function totalsHTML(lines) {
   return { total, diff, ok, html: `<div class="vc-totals"><span>借方合计 ${total.toFixed(2)}</span><span>贷方合计 ${total.toFixed(2)}</span><span class="${ok ? 'diff-ok' : 'diff-bad'}">差额 ${diff}</span></div>` };
 }
 
-function cardHTML(v, mode) {
+function cardHTML(v, mode, key = activeCardKey) {
   const t = totalsHTML(v.lines);
   return `
-    <div class="card" id="vcCard">
+    <div class="card" id="vcCard_${key}" data-card-key="${key}">
       <div style="display:flex;gap:.8rem;align-items:center;margin-bottom:.5rem;flex-wrap:wrap">
-        <b>凭证日期</b><input type="date" id="vc_date" value="${v.voucher_date}">
-        <b>附单据数</b><input id="vc_att" type="number" min="0" value="${v.attachment_count ?? 1}" style="width:60px">
+        <b>凭证日期</b><input type="date" id="vc_date" value="${escapeHTML(v.voucher_date)}" onchange="cards.get('${key}').voucher.voucher_date=this.value">
+        <b>附单据数</b><input id="vc_att" type="number" min="0" value="${escapeHTML(v.attachment_count ?? 1)}" onchange="cards.get('${key}').voucher.attachment_count=this.value" style="width:60px">
         <span class="badge ${mode === 'ai' ? '' : 'gray'}">${mode === 'ai' ? 'AI 生成 · 可编辑' : mode === 'reference' ? '依据合同/报价单生成 · 建议附发票' : '手工录入'}</span>
       </div>
       <div class="vc-line" style="font-weight:700;color:var(--muted)"><span>摘要</span><span>科目</span><span>往来单位</span><span>现金流量</span><span style="text-align:right">借方</span><span style="text-align:right">贷方</span><span></span></div>
-      ${lineEditorHTML(v.lines, 'updLine', 'delLine')}
-      <button class="small ghost" onclick="addLine()">＋ 加一行</button>
+      <div class="vc-fit">${lineEditorHTML(v.lines, 'updLine_'+key, 'delLine_'+key)}</div>
+      <button class="small ghost" onclick="selectCard('${key}');addLine()">＋ 加一行</button>
       ${t.html}
       <div id="vc_err" style="color:var(--danger);font-size:.82rem"></div>
-      <button id="vc_confirm" onclick="confirmCard('${mode}')" ${t.ok ? '' : 'disabled'}>确认落账</button>
-      ${mode !== 'manual' ? `<button class="ghost" onclick="reSuggest()">重新生成</button>` : ''}
+      ${mode !== 'manual' ? `<div class="result">请核对原件、日期、金额和科目；确认后仅生成草稿。<button class="small ghost" onclick="openOriginal(${cards.get(key)?.docId || 0})">查看原件</button></div>
+      <label>发票方向 <select data-kind onchange="cards.get('${key}').invoiceKind=this.value"><option value="">按票面主体识别</option><option value="purchase" ${cards.get(key)?.invoiceKind==='purchase'?'selected':''}>进项（收到）</option><option value="sales" ${cards.get(key)?.invoiceKind==='sales'?'selected':''}>销项（开出）</option></select></label>
+      <div data-risk hidden><p data-warnings></p><label>核对说明 <input data-reason maxlength="500" placeholder="说明与历史凭证的区别或核对结果"></label></div>` : '<p>草稿保存后请在凭证详情上传原始单据，再提交审核。</p>'}
+      <button id="vc_confirm" onclick="confirmCard('${mode}','${key}')" ${t.ok ? '' : 'disabled'}>确认生成草稿</button>
+      ${mode !== 'manual' ? `<button class="ghost" onclick="reSuggest('${key}')">重新生成</button>` : ''}
     </div>`;
 }
 
 let cardState = { mode: 'ai', voucher: null, docId: null };
+const cards = new Map();
+let activeCardKey = '', cardSeq = 0, chatEpoch = 0, chatBusy = false;
+function selectCard(key) { activeCardKey=key; cardState=cards.get(key); }
+function resetChatSession() {
+  chatEpoch++; chatBusy=false; chatLog=[]; CHAT_HISTORY=[]; pendingAsk=null;
+  for (const key of cards.keys()) { delete window['updLine_'+key]; delete window['delLine_'+key]; }
+  cards.clear(); activeCardKey=''; cardState={mode:'ai',voucher:null,docId:null};
+  V_SEL?.clear(); V_PERIOD='';
+}
 
 function showCard(mode, voucher, docId) {
-  cardState = { mode, voucher, docId };
-  addBubble(cardHTML(voucher, mode));
+  if(docId) for(const [oldKey,state] of cards) if(state.docId===docId) {
+    state.voucher=voucher; selectCard(oldKey); rerenderCard(); return;
+  }
+  const key = 'c'+(++cardSeq);
+  cards.set(key, {mode,voucher,docId,bookId:BOOK.id,busy:false}); selectCard(key);
+  window['updLine_'+key]=(i,f,v)=>{selectCard(key);updLine(i,f,v);};
+  window['delLine_'+key]=i=>{selectCard(key);delLine(i);};
+  addBubble(cardHTML(voucher, mode, key), 'ai', true);
   fitVoucherLines();
 }
 
@@ -495,12 +519,12 @@ function fitVoucherLines() {
 window.addEventListener('resize', fitVoucherLines);
 
 function rerenderCard() {
-  const card = document.getElementById('vcCard');
+  const card = document.getElementById('vcCard_'+activeCardKey);
   if (card) { card.outerHTML = cardHTML(cardState.voucher, cardState.mode); const f = $('chatFlow'); f.scrollTop = f.scrollHeight; }
   fitVoucherLines();
 }
 function refreshCardTotals() {
-  const card = document.getElementById('vcCard');
+  const card = document.getElementById('vcCard_'+activeCardKey);
   if (!card) return;
   const t = totalsHTML(cardState.voucher.lines);
   card.querySelector('.vc-totals').outerHTML = t.html;
@@ -529,6 +553,8 @@ const TOOL_CN = {
 };
 
 async function send() {
+  if (chatBusy) { addBubble('正在处理上一条，请稍候；可切换账套开始新的会话。'); return; }
+  const epoch = chatEpoch;
   const text = $('chatInput').value.trim();
   const file = $('chatFile').files[0];
   if (!text && !file) return;
@@ -543,6 +569,7 @@ async function send() {
     return;
   }
 
+  chatBusy=true;
   try {
     if (pendingAsk && !file) {
       CHAT_HISTORY.push({ role: 'user', content: text });
@@ -556,7 +583,8 @@ async function send() {
       const resp = await fetch(`/api/ai/parse?book_id=${BOOK.id}`, { method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN }, body: form });
       if (!resp.ok) throw new Error(await errorText(resp));
       doc = await resp.json();
-      const warnHtml = (doc.warnings || []).map(w => `<div class="warn">⚠ ${w}</div>`).join('');
+      if (epoch !== chatEpoch) return;
+      const warnHtml = (doc.warnings || []).map(w => `\n⚠ ${w}`).join('');
       const head = doc.degraded ? '⚠ 自动识别失败，原件已保存' : `📄 已解析（${doc.source_kind}）`;
       addBubble(`${head}：${Object.values(doc.fields).filter(v => v).join(' ｜ ') || '无字段'}${warnHtml}`);
     } else {
@@ -565,19 +593,24 @@ async function send() {
       const resp = await fetch(`/api/ai/parse?book_id=${BOOK.id}`, { method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN }, body: form });
       if (!resp.ok) throw new Error(await errorText(resp));
       doc = await resp.json();
+      if (epoch !== chatEpoch) return;
     }
     CHAT_HISTORY.push({ role: 'user', content: text || `[文件] ${file.name}` });
     await agentChat(doc.doc_id);
+    if(epoch!==chatEpoch) return;
     const extras = doc.extra_doc_ids || [];
     for (let i = 0; i < extras.length; i++) {
       if (pendingAsk) { addBubble(`⏸ 检测到还有 ${extras.length - i} 张票据待处理：先回答上面的问题；处理完后可重新上传或逐张描述`); break; }
       addBubble(`📄 继续处理下一张票据（${i + 2}/${extras.length + 1}）…`);
       await agentChat(extras[i]);
+      if(epoch!==chatEpoch) return;
     }
-  } catch (e) { addBubble(`❌ ${e.message}`); }
+  } catch (e) { if(epoch===chatEpoch) addBubble(`❌ ${e.message}`); }
+  finally { if(epoch===chatEpoch) chatBusy=false; }
 }
 
 async function agentChat(docId) {
+  const epoch=chatEpoch, requestBook=BOOK.id;
   const body = $('chatFlow');   // 用户中途切走视图时为 null，气泡已入 chatLog，切回时重放
   const thinking = document.createElement('div');
   thinking.className = 'bubble ai';
@@ -587,11 +620,12 @@ async function agentChat(docId) {
   try {
     data = await api('/api/ai/chat', {
       method: 'POST',
-      body: JSON.stringify({ book_id: BOOK.id, doc_id: docId, history: CHAT_HISTORY }),
+      body: JSON.stringify({ book_id: requestBook, doc_id: docId, history: CHAT_HISTORY }),
     });
   } finally {
     thinking.remove();
   }
+  if(epoch!==chatEpoch || BOOK.id!==requestBook) return;
   (data.trace || []).forEach(t => addTrace(t));
   // 智能体可能新建了往来档案：先刷新主数据缓存，凭证卡片下拉才能选到新档案
   if ((data.trace || []).some(t => t.tool === 'find_or_create_contact')) await loadMasters();
@@ -621,33 +655,83 @@ function addTrace(t) {
   box.appendChild(div); box.scrollTop = box.scrollHeight;
 }
 
-async function reSuggest() {
+async function reSuggest(key) {
+  if(chatBusy) return;
+  selectCard(key);
   if (!cardState.docId) return;
-  await agentChat(cardState.docId);
+  await resumeDocument(cardState.docId);
 }
 
-async function confirmCard(mode) {
-  const card = document.getElementById('vcCard');
+async function pendingDocuments() {
+  const epoch=chatEpoch;
+  try {
+    const docs=await api(`/api/ai/documents?book_id=${BOOK.id}`);
+    if(epoch!==chatEpoch) return;
+    const pending=docs.filter(d=>['parsed','suggested'].includes(d.status));
+    if(!pending.length) { addBubble('当前账套没有待处理单据。'); return; }
+    for(const doc of pending) {
+      addBubble(`待处理 #${doc.id}：${doc.file_name || doc.fields.note || '业务单据'}`);
+      if(doc.model_output) showCard(doc.doc_type==='reference'?'reference':'ai',doc.model_output,doc.id);
+      else addBubble(`<button class="ghost" onclick="resumeDocument(${doc.id})">继续生成候选 #${doc.id}</button>`, 'ai', true);
+    }
+  } catch(e) { if(epoch===chatEpoch) addBubble(e.message); }
+}
+async function resumeDocument(docId) {
+  if(chatBusy) return;
+  const epoch=chatEpoch; chatBusy=true;
+  try { await agentChat(docId); }
+  catch(e) { if(epoch===chatEpoch) addBubble(e.message); }
+  finally { if(epoch===chatEpoch) chatBusy=false; }
+}
+
+async function confirmCard(mode, key) {
+  const state=cards.get(key), epoch=chatEpoch;
+  if (!state || state.busy || state.bookId!==BOOK.id) return;
+  const card = document.getElementById('vcCard_'+key);
   const voucher_date = card.querySelector('#vc_date').value;
   const attachment_count = parseInt((card.querySelector('#vc_att') || {}).value || '0', 10);
   const errEl = card.querySelector('#vc_err');
+  state.busy=true; card.querySelector('#vc_confirm').disabled=true;
   try {
     let voucher;
     if (mode === 'ai' || mode === 'reference') {
-      voucher = await api('/api/ai/confirm', {
+      const resp = await fetch('/api/ai/confirm', {
         method: 'POST',
-        body: JSON.stringify({ doc_id: cardState.docId, voucher_date, lines: normLines(cardState.voucher.lines) }),
+        headers:{'Content-Type':'application/json',Authorization:'Bearer '+TOKEN},
+        body: JSON.stringify({ doc_id: state.docId, voucher_date, lines: normLines(state.voucher.lines),
+          invoice_kind:card.querySelector('[data-kind]').value||null,
+          risk_fingerprint:state.riskFingerprint||null, risk_reason:card.querySelector('[data-reason]').value }),
       });
+      const data=await resp.json();
+      if(epoch!==chatEpoch) return;
+      if(resp.status===409 && data.detail?.risk_fingerprint) {
+        state.riskFingerprint=data.detail.risk_fingerprint;
+        card.querySelector('[data-risk]').hidden=false;
+        card.querySelector('[data-warnings]').textContent=data.detail.warnings.join('\n');
+        throw new Error(data.detail.message);
+      }
+      if(!resp.ok) throw new Error(typeof data.detail==='string'?data.detail:'确认失败，请检查输入');
+      voucher=data;
     } else {
       voucher = await api(`/api/vouchers?book_id=${BOOK.id}`, {
         method: 'POST',
-        body: JSON.stringify({ voucher_date, attachment_count, source: 'manual', lines: normLines(cardState.voucher.lines) }),
+        body: JSON.stringify({ voucher_date, attachment_count, source: 'manual', lines: normLines(state.voucher.lines) }),
       });
     }
-    addBubble(`✅ 已落账：${voucher.voucher_no_display}（${STATUS_CN[voucher.status]}，待审核）`);
-    document.getElementById('vcCard').remove();
+    if(epoch!==chatEpoch) return;
+    addBubble(`✅ 已生成：${voucher.voucher_no_display}（草稿，尚未审核过账）`);
+    card.remove(); cards.delete(key);
+    chatLog=chatLog.filter(m=>!m.html.includes('data-card-key="'+key+'"'));
     pendingAsk = null; loadSummary(); if (currentView === 'vouchers') renderVouchers(); if (currentView === 'invoices') renderInvoices();
-  } catch (e) { errEl.textContent = '确认失败：' + e.message; }
+  } catch (e) { if(epoch===chatEpoch) errEl.textContent = '确认失败：' + e.message; }
+  finally { state.busy=false; if(card.isConnected) card.querySelector('#vc_confirm').disabled=false; }
+}
+
+async function openOriginal(docId) {
+  const r=await fetch('/api/ai/documents/'+docId+'/original',{headers:{Authorization:'Bearer '+TOKEN}});
+  if(!r.ok) { alert(await errorText(r)); return; }
+  const url=URL.createObjectURL(await r.blob()); window.open(url,'_blank','noopener');
+  setTimeout(()=>URL.revokeObjectURL(url),60000);
 }
 
 /* ---------- 凭证模块 ---------- */
@@ -743,7 +827,7 @@ function toggleAttModal() {
   ov.id = 'att_modal';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(31,39,51,.35);z-index:300;display:flex;align-items:center;justify-content:center';
   ov.onclick = e => { if (e.target === ov) closeAttModal(); };
-  ov.innerHTML = `<div style="background:#fff;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.18);min-width:420px;max-width:560px;max-height:70vh;overflow:auto;padding:1rem 1.2rem">
+  ov.innerHTML = `<div style="background:#fff;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.18);width:min(560px,96vw);min-width:0;max-height:70vh;overflow:auto;padding:1rem 1.2rem">
     <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.6rem">
       <b>📎 电子原件（${(VE.atts || []).length}）</b>
       <button class="small ghost" onclick="$('vc_att_file').click()">＋ 上传</button>
@@ -751,7 +835,7 @@ function toggleAttModal() {
       <span style="flex:1"></span>
       <b style="cursor:pointer;color:var(--muted)" onclick="closeAttModal()" title="关闭">✕</b>
     </div>
-    <div id="att_list"></div>
+    <p>增删原件后，待审核或已审核凭证将退回草稿重新审核。</p><div id="att_list"></div>
   </div>`;
   document.body.appendChild(ov);
   renderAttModal();
@@ -765,13 +849,13 @@ function renderAttModal() {
   const list = VE.atts || [];
   box.innerHTML = list.length
     ? `<table><tr><th>文件名</th><th style="width:70px">大小</th><th style="width:130px">操作</th></tr>` +
-      list.map(a => `<tr><td><a class="link" onclick="openAttachment(${a.id})">📎 ${a.original_filename}</a></td><td class="num">${fmtSize(a.file_size)}</td><td><button class="small ghost" onclick="openAttachment(${a.id})">打开</button> <button class="small danger" onclick="delAttachment(${a.id})">删除</button></td></tr>`).join('') + '</table>'
+      list.map(a => `<tr><td><a class="link" onclick="openAttachment(${a.id})">📎 ${escapeHTML(a.original_filename)}</a></td><td class="num">${fmtSize(a.file_size)}</td><td><button class="small ghost" onclick="openAttachment(${a.id})">打开</button> <button class="small danger" onclick="delAttachment(${a.id})">删除</button></td></tr>`).join('') + '</table>'
     : '<div style="color:var(--muted);font-size:.85rem;padding:.6rem 0">暂无电子原件，点「＋ 上传」添加</div>';
 }
 
 async function delAttachment(aid) {
   const a = (VE.atts || []).find(x => x.id === aid);
-  if (!a || !confirm(`确定删除附件「${a.original_filename}」？`)) return;
+  if (!a || !confirm(`确定删除附件「${escapeHTML(a.original_filename)}」？`)) return;
   try {
     const resp = await fetch(`/api/vouchers/${VE.id}/attachments/${aid}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + TOKEN } });
     if (!resp.ok && resp.status !== 204) throw new Error(await errorText(resp));
@@ -820,7 +904,7 @@ function renderVoucherDetail() {
   const linesHtml = VE.editable
     ? lineEditorHTML(v.lines, 'veUpd', 'veDel')
     : `<table><tr><th>摘要</th><th style="width:80px">科目编码</th><th>科目名称</th><th>往来单位</th><th style="width:90px">现金流量</th><th class="num">借方</th><th class="num">贷方</th></tr>` +
-      v.lines.map(line => `<tr><td>${line.summary}</td><td>${line.account_code}</td><td>${acctName(line.account_code)}</td><td>${line.contact_id ? contactName(line.contact_id) : ''}</td><td>${CF_ITEMS[line.cf_item] || ''}</td><td class="num">${line.debit}</td><td class="num">${line.credit}</td></tr>`).join('') + '</table>';
+      v.lines.map(line => `<tr><td>${escapeHTML(line.summary)}</td><td>${escapeHTML(line.account_code)}</td><td>${escapeHTML(acctName(line.account_code))}</td><td>${escapeHTML(line.contact_id ? contactName(line.contact_id) : '')}</td><td>${CF_ITEMS[line.cf_item] || ''}</td><td class="num">${line.debit}</td><td class="num">${line.credit}</td></tr>`).join('') + '</table>';
   const t = totalsHTML(v.lines);
   $('mainArea').innerHTML = `
     <h3 class="view-title"><a class="link" onclick="switchView('vouchers')">← 凭证列表</a>
@@ -881,7 +965,7 @@ async function renderAccounts() {
   $('mainArea').innerHTML = `<h3 class="view-title">🗂 科目设置</h3><div id="aux_panel"></div><div id="acc_body">加载中…</div>
     <div class="card" style="margin-top:1rem"><b>➕ 新增明细科目</b>
       <div class="vc-line" style="grid-template-columns:1fr 140px 140px auto">
-        <select id="na_parent">${ACCOUNTS.filter(a => a.is_leaf && a.level < 3).map(a => `<option value="${a.code}">${a.code} ${a.name}</option>`).join('')}</select>
+        <select id="na_parent">${ACCOUNTS.filter(a => a.is_leaf && a.level < 3).map(a => `<option value="${a.code}">${a.code} ${escapeHTML(a.name)}</option>`).join('')}</select>
         <input id="na_code" placeholder="编码 如 5602.11">
         <input id="na_name" placeholder="科目名称">
         <button onclick="createAccount()">创建</button>
@@ -902,7 +986,7 @@ function renderAccountTree() {
       const auxTypes = auxTypesOf(a.code);
       rows.push(`
         <tr class="${a.level === 1 ? 'rollup-row' : ''}" style="${a.is_active ? '' : 'opacity:.5'}">
-          <td style="padding-left:${depth * 1.2}rem">${a.code} ${a.name}${a.is_preset ? '' : ' <span class="badge gray">自建</span>'}</td>
+          <td style="padding-left:${depth * 1.2}rem">${a.code} ${escapeHTML(a.name)}${a.is_preset ? '' : ' <span class="badge gray">自建</span>'}</td>
           <td>${auxTypes.length ? auxTypes.map(t => `<span class="badge">${CTYPE_CN[t] || t}</span>`).join('') : ''}</td>
           <td>${a.is_active ? '<span class="badge">启用</span>' : '<span class="badge gray">停用</span>'}</td>
           <td>${ROLE === 'admin' ? `
@@ -922,7 +1006,7 @@ function openAuxEditor(code) {
   const current = auxTypesOf(code);
   const panel = $('aux_panel');
   panel.innerHTML = `<div class="card" style="border-color:var(--accent)">
-    <b>辅助核算配置：${account.code} ${account.name}</b>
+    <b>辅助核算配置：${account.code} ${escapeHTML(account.name)}</b>
     <div class="chips" style="margin:.5rem 0">
       ${Object.keys(CTYPE_CN).map(t => `<span class="chip ${current.includes(t) ? 'on' : ''}" onclick="toggleAuxChip('${t}',this)">${CTYPE_CN[t]}</span>`).join('')}
     </div>
@@ -997,12 +1081,12 @@ async function renderContactsView() {
   try {
     const list = await api(`/api/contacts?book_id=${BOOK.id}${contactTab ? '&ctype=' + contactTab : ''}`);
     $('t_body').innerHTML = list.length ? `<table><tr><th>名称</th><th>类型</th><th>税号</th><th>被哪些科目使用</th><th>状态</th><th>操作</th></tr>` +
-      list.map(c => `<tr><td>${c.name}</td><td><span class="badge ${c.ctype === 'customer' ? '' : 'gray'}">${CTYPE_CN[c.ctype]}</span></td>
+      list.map(c => `<tr><td>${escapeHTML(c.name)}</td><td><span class="badge ${c.ctype === 'customer' ? '' : 'gray'}">${CTYPE_CN[c.ctype]}</span></td>
         <td>${c.tax_no || ''}</td><td>${c.used_by && c.used_by.length ? c.used_by.join('、') : '<span class="result">暂无</span>'}</td>
         <td>${c.is_active ? '<span class="badge">启用</span>' : '<span class="badge gray">停用</span>'}</td>
         <td>${ROLE === 'admin' ? `<button class="small ghost" onclick="toggleContactNew(${c.id},${c.is_active})">${c.is_active ? '停用' : '启用'}</button>` : ''}</td></tr>`).join('') + '</table>'
       : '<div class="result">该类型下暂无往来单位。</div>';
-  } catch (e) { $('t_body').innerHTML = `<div class="result" style="color:var(--danger)">加载失败：${e.message}</div>`; }
+  } catch (e) { $('t_body').innerHTML = `<div class="result" style="color:var(--danger)">加载失败：${escapeHTML(e.message)}</div>`; }
 }
 
 async function toggleContactNew(id, isActive) {
@@ -1153,7 +1237,7 @@ async function renderTB() {
     const rows = r.rows;
     const body = rows.map(row => {
       const isRollup = !!row.is_rollup;
-      const name = `${row.account_code} ${row.account_name}${row.has_aux ? ' <a class="link" onclick="renderAuxBalance(\'' + row.account_code + '\')">往来</a>' : ''}`;
+      const name = `${row.account_code} ${escapeHTML(row.account_name)}${row.has_aux ? ' <a class="link" onclick="renderAuxBalance(\'' + row.account_code + '\')">往来</a>' : ''}`;
       const ucols = showU ? `<td class="num" style="color:var(--muted)">${row.unposted_debit}</td><td class="num" style="color:var(--muted)">${row.unposted_credit}</td>` : '';
       return `<tr class="${isRollup ? 'rollup-row' : ''}" style="${row.is_active ? '' : 'opacity:.5'}">
         <td style="${isRollup ? '' : 'padding-left:1.4rem'}">${isRollup ? '▾ ' : ''}${name}</td>
@@ -1169,7 +1253,7 @@ async function renderTB() {
       <table><tr><th>科目</th><th class="num">期初借</th><th class="num">期初贷</th><th class="num">发生借</th><th class="num">发生贷</th><th class="num">期末借</th><th class="num">期末贷</th>${uhead}</tr>${body}
       <tr class="total-row"><td>合计</td><td class="num">${r.totals.opening_debit}</td><td class="num">${r.totals.opening_credit}</td><td class="num">${r.totals.period_debit}</td><td class="num">${r.totals.period_credit}</td><td class="num">${r.totals.closing_debit}</td><td class="num">${r.totals.closing_credit}</td>${utotal}</tr></table>
       ${warn}<div class="result" style="margin-top:.5rem">含一级科目汇总行（灰底）；标「往来」的科目可点击查看按客户/供应商的辅助余额。${showU ? '未过账金额为独立列，不计入已过账三栏。' : ''}</div>`;
-  } catch (e) { $('t_body').innerHTML = `<div class="result" style="color:var(--danger)">加载失败：${e.message}</div>`; }
+  } catch (e) { $('t_body').innerHTML = `<div class="result" style="color:var(--danger)">加载失败：${escapeHTML(e.message)}</div>`; }
 }
 
 async function renderAuxBalance(accountCode) {
@@ -1178,8 +1262,8 @@ async function renderAuxBalance(accountCode) {
     const r = await api(`/api/reports/aux-balance?book_id=${BOOK.id}&period=${PERIOD}&account_code=${accountCode}`);
     $('t_body').innerHTML = `<div class="result">期初净额：${r.opening_net}</div>
       <table><tr><th>往来单位</th><th class="num">本期借方</th><th class="num">本期贷方</th><th class="num">期末借方</th><th class="num">期末贷方</th></tr>` +
-      (r.rows.length ? r.rows.map(row => `<tr><td>${row.contact_name}</td><td class="num">${row.period_debit}</td><td class="num">${row.period_credit}</td><td class="num">${row.closing_debit}</td><td class="num">${row.closing_credit}</td></tr>`).join('') : '<tr><td colspan="5">本期无发生</td></tr>') + '</table>';
-  } catch (e) { $('t_body').innerHTML = `<div class="result" style="color:var(--danger)">加载失败：${e.message}</div>`; }
+      (r.rows.length ? r.rows.map(row => `<tr><td>${escapeHTML(row.contact_name)}</td><td class="num">${row.period_debit}</td><td class="num">${row.period_credit}</td><td class="num">${row.closing_debit}</td><td class="num">${row.closing_credit}</td></tr>`).join('') : '<tr><td colspan="5">本期无发生</td></tr>') + '</table>';
+  } catch (e) { $('t_body').innerHTML = `<div class="result" style="color:var(--danger)">加载失败：${escapeHTML(e.message)}</div>`; }
 }
 
 /* ---------- 报表模块 ---------- */
@@ -1216,11 +1300,11 @@ async function loadReport(kind) {
       const r = await api(`/api/reports/balance-sheet?book_id=${BOOK.id}&period=${PERIOD}`);
       $('t_body').innerHTML = `<div class="badge">${r.total_assets === r.total_liabilities_and_equity ? '✅ 资产 = 负债 + 权益' : '❌ 不平衡'}</div>
         <table><tr><th>项目</th><th class="num">期末余额</th><th class="num">年初余额</th></tr>` +
-        r.rows.map(row => `<tr class="${row.bold ? 'total-row' : ''}"><td>${row.name}</td><td class="num">${row.closing}</td><td class="num">${row.year_begin}</td></tr>`).join('') + '</table>';
+        r.rows.map(row => `<tr class="${row.bold ? 'total-row' : ''}"><td>${escapeHTML(row.name)}</td><td class="num">${row.closing}</td><td class="num">${row.year_begin}</td></tr>`).join('') + '</table>';
     } else if (kind === 'is') {
       const r = await api(`/api/reports/income-statement?book_id=${BOOK.id}&period=${PERIOD}`);
       $('t_body').innerHTML = `<table><tr><th>项目</th><th class="num">本月金额</th><th class="num">本年累计金额</th></tr>` +
-        r.rows.map(row => `<tr class="${row.bold ? 'total-row' : ''}"><td>${row.name}</td><td class="num">${row.month}</td><td class="num">${row.year_to_date}</td></tr>`).join('') + '</table>';
+        r.rows.map(row => `<tr class="${row.bold ? 'total-row' : ''}"><td>${escapeHTML(row.name)}</td><td class="num">${row.month}</td><td class="num">${row.year_to_date}</td></tr>`).join('') + '</table>';
     } else if (kind === 'tpl') {
       TPL_CACHE = await api(`/api/reports/template-check?book_id=${BOOK.id}&period=${PERIOD}`);
       CHECKS_CACHE = await api(`/api/reports/checks?book_id=${BOOK.id}&period=${PERIOD}`);
@@ -1228,10 +1312,10 @@ async function loadReport(kind) {
     } else {
       const r = await api(`/api/reports/cash-flow?book_id=${BOOK.id}&period=${PERIOD}`);
       $('t_body').innerHTML = `<table><tr><th>项目</th><th class="num">本月金额</th><th class="num">本年累计金额</th></tr>` +
-        r.rows.map(row => `<tr class="${row.bold ? 'total-row' : ''}"><td>${row.name}</td><td class="num">${row.month}</td><td class="num">${row.year_to_date}</td></tr>`).join('') + '</table>' +
+        r.rows.map(row => `<tr class="${row.bold ? 'total-row' : ''}"><td>${escapeHTML(row.name)}</td><td class="num">${row.month}</td><td class="num">${row.year_to_date}</td></tr>`).join('') + '</table>' +
         `<div class="result" style="margin-top:.5rem">口径：直接法；现金内部划转已剔除；净增加额与现金类科目变动自动对账。</div>`;
     }
-  } catch (e) { $('t_body').innerHTML = `<div class="result" style="color:var(--danger)">加载失败：${e.message}</div>`; }
+  } catch (e) { $('t_body').innerHTML = `<div class="result" style="color:var(--danger)">加载失败：${escapeHTML(e.message)}</div>`; }
 }
 
 let TPL_CACHE = null, TPL_EDIT = null, CHECKS_CACHE = null;
@@ -1247,7 +1331,7 @@ function renderTpl() {
     ? `<div class="remind">⚠️ 模板引用了账套中不存在的科目：${r.dirty_refs.map(d => `${repName[d.report]} ${d.code}`).join('、')}</div>` : '';
   const unmappedRows = unmapped.length
     ? `<table><tr><th>科目</th><th class="num">期末余额</th><th>提示</th></tr>` +
-      unmapped.map(a => `<tr${a.has_balance ? ' style="color:var(--danger);font-weight:700"' : ''}><td>${a.code} ${a.name}${a.is_active ? '' : '（停用）'}</td><td class="num">${a.has_balance ? a.closing : '—'}</td><td>${a.has_balance ? '⚠️ 有余额，余额不会进任何报表' : '无余额，暂不影响报表'}</td></tr>`).join('') + '</table>'
+      unmapped.map(a => `<tr${a.has_balance ? ' style="color:var(--danger);font-weight:700"' : ''}><td>${a.code} ${escapeHTML(a.name)}${a.is_active ? '' : '（停用）'}</td><td class="num">${a.has_balance ? a.closing : '—'}</td><td>${a.has_balance ? '⚠️ 有余额，余额不会进任何报表' : '无余额，暂不影响报表'}</td></tr>`).join('') + '</table>'
     : '<div class="result">✅ 所有叶子科目均已映射到报表</div>';
   const tplTables = ['bs', 'is'].map(rep => {
     const rows = (r.rows[rep] || []).map(row => {
@@ -1261,7 +1345,7 @@ function renderTpl() {
       }
       const editBtn = row.kind === 'line'
         ? `<button class="small ghost" onclick="tplEdit('${rep}','${row.key}')">编辑</button>` : '';
-      return `<tr${row.kind === 'calc' ? ' class="rollup-row"' : ''}><td>${row.name}</td><td>${codes}</td><td style="width:60px">${editBtn}</td></tr>`;
+      return `<tr${row.kind === 'calc' ? ' class="rollup-row"' : ''}><td>${escapeHTML(row.name)}</td><td>${codes}</td><td style="width:60px">${editBtn}</td></tr>`;
     }).join('');
     return `<div style="display:flex;align-items:center;gap:.6rem;margin:.9rem 0 .3rem"><h4 style="margin:0">${repName[rep]}（行 → 科目）</h4>
       <button class="small ghost" onclick="resetTpl('${rep}')">恢复默认模板</button></div>
@@ -1282,7 +1366,7 @@ function tplEditorHtml() {
   const chips = items.length
     ? items.map((it, i) => `<span class="badge gray" style="margin-right:.3rem">${it.sign}${it.code} ${acctLabel(it.code) || '<b style="color:var(--danger)">科目不存在</b>'} <b style="cursor:pointer;color:var(--danger)" onclick="tplDelItem(${i})" title="移除">✕</b></span>`).join('')
     : '<span style="color:var(--muted)">（空映射，该行恒为 0.00）</span>';
-  const opts = ACCOUNTS.map(a => `<option value="${a.code}">${a.code} ${a.name}${a.is_active ? '' : '（停用）'}</option>`).join('');
+  const opts = ACCOUNTS.map(a => `<option value="${a.code}">${a.code} ${escapeHTML(a.name)}${a.is_active ? '' : '（停用）'}</option>`).join('');
   return `<div style="padding:.3rem 0">
     <div style="margin-bottom:.35rem">${chips}</div>
     <div style="display:flex;gap:.4rem;align-items:center">
@@ -1337,7 +1421,7 @@ async function renderOpening() {
     const map = {};
     existing.forEach(o => { map[o.account_code] = o; });
     const leaves = ACCOUNTS.filter(a => a.is_leaf);
-    const rows = leaves.map(a => `<tr><td>${a.code} ${a.name}${a.is_active ? '' : ' <span class="badge gray">停用</span>'}</td>
+    const rows = leaves.map(a => `<tr><td>${a.code} ${escapeHTML(a.name)}${a.is_active ? '' : ' <span class="badge gray">停用</span>'}</td>
       <td class="num"><input data-code="${a.code}" data-side="debit" value="${(map[a.code] || {}).debit ? parseFloat(map[a.code].debit) : ''}" placeholder="0" style="width:120px;text-align:right" ${canEdit ? '' : 'disabled'}></td>
       <td class="num"><input data-code="${a.code}" data-side="credit" value="${(map[a.code] || {}).credit ? parseFloat(map[a.code].credit) : ''}" placeholder="0" style="width:120px;text-align:right" ${canEdit ? '' : 'disabled'}></td></tr>`).join('');
     $('t_body').innerHTML = `<div class="result">录入启用期间（${BOOK.start_period}）之前各科目的期末余额；保存时自动试算平衡；账套已存在过账凭证后不允许修改。</div>
@@ -1346,7 +1430,7 @@ async function renderOpening() {
       ${canEdit ? '<button onclick="saveOpening()">保存期初余额</button>' : '<div class="result">仅管理员可保存</div>'}`;
     updOpeningTotals();
     document.querySelectorAll('#t_body input').forEach(inp => inp.addEventListener('input', updOpeningTotals));
-  } catch (e) { $('t_body').innerHTML = `<div class="result" style="color:var(--danger)">${e.message}</div>`; }
+  } catch (e) { $('t_body').innerHTML = `<div class="result" style="color:var(--danger)">${escapeHTML(e.message)}</div>`; }
 }
 
 function updOpeningTotals() {
@@ -1408,8 +1492,8 @@ async function renderInvoices() {
         <td>${i.invoice_no}</td><td>${i.invoice_date}</td>
         <td>${i.kind === 'sales' ? '销项' : '进项'}</td>
         <td>${INV_TYPE_CN[i.invoice_type] || i.invoice_type}</td>
-        <td>${i.kind === 'sales' ? i.buyer_name : i.seller_name}</td>
-        <td>${i.goods_name}</td>
+        <td>${escapeHTML(i.kind === 'sales' ? i.buyer_name : i.seller_name)}</td>
+        <td>${escapeHTML(i.goods_name)}</td>
         <td class="num">${i.amount_total}</td>
         <td>${INV_STATUS_CN[i.status] || i.status}</td>
         <td>${i.voucher_id
@@ -1440,12 +1524,40 @@ async function importInvoices() {
 async function bookInvoice(id) {
   const inv = INV_LIST.find(x => x.id === id);
   if (!inv) return;
-  if (pendingAsk) { alert('AI 助手正在等你回复上一个问题，请先处理'); return; }
+  if (pendingAsk || chatBusy) { alert('请先处理当前 AI 请求'); return; }
   switchView('chat');
   const dir = inv.kind === 'sales' ? '销项' : '进项';
   const party = inv.kind === 'sales' ? `购买方「${inv.buyer_name}」` : `销售方「${inv.seller_name}」`;
-  $('chatInput').value = `请为这张${dir}发票记账：发票号 ${inv.invoice_no}，开票日期 ${inv.invoice_date}，${party}，品名「${inv.goods_name}」，价税合计 ${inv.amount_total} 元。`;
-  send();
+  const note=`请为这张${dir}发票记账：发票号 ${inv.invoice_no}，开票日期 ${inv.invoice_date}，${party}，品名「${inv.goods_name}」，价税合计 ${inv.amount_total} 元。`;
+  const epoch=chatEpoch; chatBusy=true;
+  addBubble(note,'user');
+  try {
+    const form=new FormData(); form.append('note',note); form.append('invoice_id',id);
+    const response=await fetch(`/api/ai/parse?book_id=${BOOK.id}`,{method:'POST',headers:{Authorization:'Bearer '+TOKEN},body:form});
+    if(!response.ok) throw new Error(await errorText(response));
+    const doc=await response.json(); if(epoch!==chatEpoch) return;
+    CHAT_HISTORY.push({role:'user',content:note}); await agentChat(doc.doc_id);
+  } catch(e) { if(epoch===chatEpoch) addBubble(e.message); }
+  finally { if(epoch===chatEpoch) chatBusy=false; }
+}
+
+async function renderBackup() {
+  if(ROLE!=='admin') { $('mainArea').textContent='完整备份需要管理员权限。'; return; }
+  $('mainArea').innerHTML='<h3>完整备份</h3><p>包含账务数据库、原始单据、待处理文件和模型解密文件。请将下载的备份保存在受控位置。</p><button onclick="downloadBackup(this)">生成并下载完整备份</button><p id="backupStatus">正在检查最近备份…</p><p>恢复需先退出服务，并恢复到新的空数据目录；现有账务数据不会被直接覆盖。</p>';
+  try { const s=await api('/api/system/backup-status'); if($('backupStatus')) $('backupStatus').textContent=(s.ok?'最近完整备份成功：':'最近备份未成功：')+(s.time||'')+' '+(s.message||''); }
+  catch(e) { if($('backupStatus')) $('backupStatus').textContent=e.message; }
+}
+async function downloadBackup(button) {
+  button.disabled=true;
+  try {
+    const response=await fetch('/api/system/backup',{method:'POST',headers:{Authorization:'Bearer '+TOKEN}});
+    if(!response.ok) throw new Error(await errorText(response));
+    const url=URL.createObjectURL(await response.blob()),a=document.createElement('a');
+    a.href=url; a.download='LedgerAI-full-backup-'+new Date().toISOString().replace(/[:.]/g,'-')+'.zip'; a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),60000);
+    if($('backupStatus')) $('backupStatus').textContent='完整备份已生成并开始下载。';
+  } catch(e) { if($('backupStatus')) $('backupStatus').textContent=e.message; }
+  finally { button.disabled=false; }
 }
 
 async function renderTax() {
@@ -1475,15 +1587,15 @@ async function renderUsers() {
   $('mainArea').innerHTML = `<h3 class="view-title">👥 用户管理</h3><div id="t_body">加载中…</div>`;
   const users = await api('/api/users');
   $('t_body').innerHTML = `<table><tr><th>用户名</th><th>姓名</th><th>全局角色</th><th>状态</th><th>操作</th></tr>` +
-    users.map(u => `<tr><td>${u.username}</td><td>${u.display_name || ''}</td>
+    users.map(u => `<tr><td>${escapeHTML(u.username)}</td><td>${escapeHTML(u.display_name || '')}</td>
       <td><select onchange="patchUser(${u.id},{role:this.value})">
         ${['admin', 'bookkeeper', 'auditor'].map(r2 => `<option value="${r2}" ${u.role === r2 ? 'selected' : ''}>${ROLE_CN[r2]}</option>`).join('')}
       </select></td>
       <td>${u.is_active ? '<span class="badge">启用</span>' : '<span class="badge gray">停用</span>'}</td>
-      <td><button class="small ghost" onclick="grantBooks(${u.id},'${u.username}','${u.role}')">账套授权</button>
-      <button class="small ghost" onclick="resetPwd(${u.id},'${u.username}')">重置密码</button>
+      <td><button class="small ghost" onclick="grantBooks(${u.id},'用户','${u.role}')">账套授权</button>
+      <button class="small ghost" onclick="resetPwd(${u.id},'用户')">重置密码</button>
       <button class="small ghost" onclick="patchUser(${u.id},{is_active:${!u.is_active}})">${u.is_active ? '停用' : '启用'}</button>
-      <button class="small danger" onclick="delUser(${u.id},'${u.username}')">删除</button></td></tr>`).join('') + '</table>' +
+      <button class="small danger" onclick="delUser(${u.id},'用户')">删除</button></td></tr>`).join('') + '</table>' +
     `<div class="card" style="margin-top:1rem"><b>新增用户</b>
       <div class="vc-line" style="grid-template-columns:1fr 1fr 1fr 1fr auto">
         <input id="nu_name" placeholder="用户名（≥3字符）"><input id="nu_pass" type="password" placeholder="密码（≥6字符）">
@@ -1505,7 +1617,7 @@ async function grantBooks(userId, username, globalRole) {
   const rows = allBooks.map(b => {
     const role = granted.get(b.id) || '';
     return `<tr>
-      <td>${b.name}${b.taxpayer_type === 'general' ? '（一般纳税人）' : ''}</td>
+      <td>${escapeHTML(b.name)}${b.taxpayer_type === 'general' ? '（一般纳税人）' : ''}</td>
       <td style="text-align:center"><input type="checkbox" id="gb_${b.id}" ${role ? 'checked' : ''} onchange="gbToggle(${b.id})"></td>
       <td><select id="gbr_${b.id}" ${role ? '' : 'disabled'}>
         ${['bookkeeper', 'auditor', 'admin'].map(r2 => `<option value="${r2}" ${role === r2 ? 'selected' : ''}>${{bookkeeper:'制单',auditor:'审核',admin:'管理员'}[r2]}</option>`).join('')}

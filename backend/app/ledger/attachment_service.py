@@ -1,4 +1,5 @@
 import hashlib
+import json
 import re
 from pathlib import Path
 from uuid import uuid4
@@ -32,6 +33,17 @@ def _sync_attachment_count(db: Session, voucher: Voucher) -> None:
     voucher.attachment_count = count or 0
 
 
+def _record_original_edit(voucher: Voucher, operator_id: int) -> None:
+    voucher.edited_by = operator_id
+    editors = set(json.loads(voucher.editor_ids_json or '[]'))
+    editors.add(operator_id)
+    voucher.editor_ids_json = json.dumps(sorted(editors))
+    if voucher.status in ('submitted', 'audited'):
+        voucher.status = 'draft'
+        voucher.audited_by = None
+        voucher.audited_at = None
+
+
 def list_attachments(db: Session, voucher_id: int) -> list[Attachment]:
     return list(
         db.scalars(
@@ -57,6 +69,7 @@ def save_attachment(
     original_filename: str,
     content_type: str,
     operator_id: int,
+    commit: bool = True,
 ) -> Attachment:
     _ensure_editable(voucher)
     if not content:
@@ -81,14 +94,20 @@ def save_attachment(
         uploaded_by=operator_id,
     )
     db.add(attachment)
-    db.flush()
-    _sync_attachment_count(db, voucher)
-    db.commit()
-    db.refresh(attachment)
+    try:
+        db.flush()
+        _sync_attachment_count(db, voucher)
+        _record_original_edit(voucher, operator_id)
+        if commit:
+            db.commit()
+        db.refresh(attachment)
+    except Exception:
+        (target_dir / stored_name).unlink(missing_ok=True)
+        raise
     return attachment
 
 
-def delete_attachment(db: Session, *, voucher: Voucher, attachment_id: int) -> None:
+def delete_attachment(db: Session, *, voucher: Voucher, attachment_id: int, operator_id: int | None = None) -> None:
     _ensure_editable(voucher)
     attachment = get_attachment(db, voucher.id, attachment_id)
     path = _attachment_path(attachment)
@@ -97,6 +116,7 @@ def delete_attachment(db: Session, *, voucher: Voucher, attachment_id: int) -> N
     db.delete(attachment)
     db.flush()
     _sync_attachment_count(db, voucher)
+    _record_original_edit(voucher, operator_id or voucher.created_by)
     db.commit()
 
 
@@ -113,4 +133,7 @@ def read_attachment_file(attachment: Attachment) -> bytes:
     path = _attachment_path(attachment)
     if not path.exists():
         raise VoucherError("附件文件已丢失")
-    return path.read_bytes()
+    content = path.read_bytes()
+    if hashlib.sha256(content).hexdigest() != attachment.sha256:
+        raise VoucherError("附件校验失败：原件内容已改变")
+    return content

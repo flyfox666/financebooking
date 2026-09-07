@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, require_book_access
+from app.api.deps import get_current_user, require_book_access, require_bookkeeper
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.ledger.ai import parse as ai_parse
@@ -18,6 +18,31 @@ from app.schemas.ai import ChatIn, ConfirmIn, SuggestIn
 from app.schemas.voucher import VoucherOut
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
+
+
+@router.get('/documents/{doc_id}/original')
+def document_original(doc_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from fastapi.responses import FileResponse, Response
+    from app.ledger.attachment_service import list_attachments, read_attachment_file
+    doc = db.get(AIDoc, doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail='单据不存在')
+    require_book_access(doc.book_id, db=db, user=user)
+    if doc.voucher_id:
+        attachments = list_attachments(db, doc.voucher_id)
+        if attachments:
+            item = attachments[0]
+            content = read_attachment_file(item)
+            safe_type = item.content_type if item.content_type in ('application/pdf','image/png','image/jpeg','image/webp') else 'application/octet-stream'
+            return Response(content, media_type=safe_type, headers={'X-Content-Type-Options':'nosniff'})
+    path = Path(doc.staging_path) if doc.staging_path else None
+    if path is None or not path.is_file():
+        raise HTTPException(status_code=404, detail='该记录没有可查看的原始文件')
+    import mimetypes
+    mime = mimetypes.guess_type(doc.file_name)[0]
+    if mime not in ('application/pdf','image/png','image/jpeg','image/webp'):
+        mime = 'application/octet-stream'
+    return FileResponse(path, media_type=mime, headers={'X-Content-Type-Options':'nosniff'})
 
 
 def _doc_summary(doc: AIDoc) -> dict:
@@ -54,6 +79,7 @@ async def parse_document(
     book_id: int,
     file: UploadFile | None = File(default=None),
     note: str = Form(default=""),
+    invoice_id: int | None = Form(default=None),
     allow_vlm: bool = Form(default=True),
     db: Session = Depends(get_db),
     user: User = Depends(require_book_access),
@@ -62,7 +88,10 @@ async def parse_document(
         raise HTTPException(status_code=400, detail="请上传单据文件或输入业务描述")
 
     if file is not None:
-        content = await file.read()
+        from app.ledger.attachment_service import MAX_FILE_SIZE
+        content = await file.read(MAX_FILE_SIZE + 1)
+        if len(content) > MAX_FILE_SIZE:
+            raise HTTPException(status_code=413, detail='单据文件不能超过10MB')
         filename = file.filename or ""
         # 解析失败是正常业务路径而非异常：除"文件类型不识别"外一律降级，绝不 500
         try:
@@ -116,11 +145,23 @@ async def parse_document(
             extra_doc_ids.append(extra.id)
         return {"doc_id": doc.id, "extra_doc_ids": extra_doc_ids, **result}
 
+    fields = {"note": note.strip()}
+    if invoice_id is not None:
+        from app.models.tax import Invoice
+        invoice = db.get(Invoice, invoice_id)
+        if invoice is None or invoice.book_id != book_id:
+            raise HTTPException(status_code=404, detail='发票不存在')
+        if invoice.voucher_id:
+            raise HTTPException(status_code=409, detail='发票已经关联凭证')
+        for key in ('invoice_no','invoice_date','buyer_name','buyer_tax_no','seller_name','seller_tax_no','goods_name','amount_total','status'):
+            fields[key] = str(getattr(invoice, key, '') or '')
+        fields['confirmed_kind'] = invoice.kind
+        fields['ledger_invoice_id'] = invoice.id
     doc = AIDoc(
         book_id=book_id,
-        doc_type="text",
+        doc_type="invoice" if invoice_id is not None else "text",
         source_kind="text",
-        fields_json=json.dumps({"note": note.strip()}, ensure_ascii=False),
+        fields_json=json.dumps(fields, ensure_ascii=False),
         status="parsed",
     )
     db.add(doc)
@@ -128,9 +169,9 @@ async def parse_document(
     db.refresh(doc)
     return {
         "doc_id": doc.id,
-        "doc_type": "text",
+        "doc_type": doc.doc_type,
         "source_kind": "text",
-        "fields": {"note": note.strip()},
+        "fields": fields,
         "warnings": [],
         "layers": ["text"],
     }
@@ -180,6 +221,7 @@ def suggest_voucher(
         "voucher": result["voucher"],
         "warnings": result["warnings"],
         "confidence": result["confidence"],
+        "validation_status": result["validation_status"],
     }
 
 
@@ -244,6 +286,7 @@ def confirm_suggestion(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    require_bookkeeper(user)
     doc = db.get(AIDoc, body.doc_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="AI 解析记录不存在")
@@ -255,8 +298,14 @@ def confirm_suggestion(
             voucher_date=body.voucher_date,
             lines=body.lines,
             operator_id=user.id,
+            invoice_kind=body.invoice_kind,
+            risk_fingerprint=body.risk_fingerprint,
+            risk_reason=body.risk_reason,
         )
     except LedgerError as exc:
+        from app.ledger.ai.confirmation import CandidateRisk
+        if isinstance(exc, CandidateRisk):
+            raise HTTPException(status_code=409, detail=exc.detail)
         raise HTTPException(status_code=400, detail=str(exc))
     return voucher
 
@@ -282,6 +331,7 @@ def discard_document(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    require_bookkeeper(user)
     doc = db.get(AIDoc, doc_id)
     if doc is not None:
         require_book_access(doc.book_id, db=db, user=user)

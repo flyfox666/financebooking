@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.ledger.exceptions import BookError, VoucherError
@@ -24,7 +26,10 @@ def _quantize(value: Decimal) -> Decimal:
 
 def _to_amount(value) -> Decimal:
     try:
-        return _quantize(Decimal(str(value)))
+        amount = _quantize(Decimal(str(value)))
+        if not amount.is_finite() or abs(amount) >= Decimal('10000000000000000'):
+            raise ValueError()
+        return amount
     except Exception:
         raise VoucherError("金额格式不合法")
 
@@ -160,9 +165,9 @@ def _apply_cf_items(raw_lines, prepared: list[dict]) -> None:
             # 兜底：按对方最大行科目映射，方向看本行现金增减
             cash_amount = row["debit"] - row["credit"]
             if cash_amount > 0:
-                cf = INFLOW_MAP.get(main_code, "other_in")
+                cf = INFLOW_MAP.get(main_code, INFLOW_MAP.get(main_code[:4], "other_in"))
             elif cash_amount < 0:
-                cf = OUTFLOW_MAP.get(main_code, "other_out")
+                cf = OUTFLOW_MAP.get(main_code, OUTFLOW_MAP.get(main_code[:4], "other_out"))
         row["cf_item"] = cf or None
 
 
@@ -176,6 +181,7 @@ def create_voucher(
     attachment_count: int = 0,
     source: str = "manual",
     strict_accounts: bool = True,
+    commit: bool = True,
 ) -> Voucher:
     if source not in ALLOWED_SOURCES:
         raise VoucherError("凭证来源不合法")
@@ -205,7 +211,10 @@ def create_voucher(
     )
     voucher.lines = [VoucherLine(**row) for row in prepared]
     db.add(voucher)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(voucher)
     return voucher
 
@@ -233,13 +242,25 @@ def update_voucher(
     voucher_date=None,
     attachment_count: int | None = None,
     lines: list[dict] | None = None,
+    operator_id: int | None = None,
 ) -> Voucher:
     voucher = _load_voucher(db, voucher_id)
     if voucher.status != "draft":
         raise VoucherError("只有草稿凭证可以修改")
+    _ensure_period_open(db, voucher.book_id, voucher.period)
+    if operator_id is not None:
+        operator = db.get(User, operator_id)
+        if operator is None or operator.role not in ("admin", "bookkeeper"):
+            raise VoucherError("审核岗不能修改凭证")
+        voucher.edited_by = operator_id
+        editors = set(json.loads(voucher.editor_ids_json or '[]'))
+        editors.add(operator_id)
+        voucher.editor_ids_json = json.dumps(sorted(editors))
     if voucher_date is not None:
         new_date = _ensure_date(voucher_date)
         new_period = f"{new_date:%Y-%m}"
+        if new_period < db.get(Book, voucher.book_id).start_period:
+            raise VoucherError("凭证期间早于账套启用期间")
         if new_period != voucher.period:
             _ensure_period_open(db, voucher.book_id, new_period)
             new_no = _next_voucher_no(db, voucher.book_id, new_period)
@@ -277,6 +298,8 @@ def submit_voucher(db: Session, *, voucher_id: int, operator_id: int) -> Voucher
     voucher = _load_voucher(db, voucher_id)
     if voucher.status != "draft":
         raise VoucherError("只有草稿凭证可以提交审核")
+    _ensure_period_open(db, voucher.book_id, voucher.period)
+    _ensure_originals(db, voucher)
     voucher.status = "submitted"
     db.commit()
     db.refresh(voucher)
@@ -297,8 +320,10 @@ def audit_voucher(db: Session, *, voucher_id: int, operator: User) -> Voucher:
     voucher = _load_voucher(db, voucher_id)
     if voucher.status != "submitted":
         raise VoucherError("只有待审核凭证可以审核")
-    if operator.id == voucher.created_by:
+    if operator.id in {voucher.created_by, voucher.edited_by, *json.loads(voucher.editor_ids_json or '[]')}:
         raise VoucherError("制单与审核不能为同一人")
+    _ensure_period_open(db, voucher.book_id, voucher.period)
+    _ensure_originals(db, voucher)
     voucher.status = "audited"
     voucher.audited_by = operator.id
     voucher.audited_at = datetime.now()
@@ -311,6 +336,16 @@ def post_voucher(db: Session, *, voucher_id: int, operator: User) -> Voucher:
     voucher = _load_voucher(db, voucher_id)
     if voucher.status != "audited":
         raise VoucherError("只有已审核凭证可以过账")
+    _ensure_period_open(db, voucher.book_id, voucher.period)
+    _ensure_originals(db, voucher)
+    if voucher.reverses_voucher_id:
+        claimed = db.execute(update(Voucher).where(
+            Voucher.id == voucher.reverses_voucher_id,
+            Voucher.status == 'posted', Voucher.voided_by_voucher_id.is_(None),
+        ).values(status='voided', voided_by_voucher_id=voucher.id))
+        if claimed.rowcount != 1:
+            db.rollback()
+            raise VoucherError("原凭证已被冲销或状态发生变化")
     voucher.status = "posted"
     voucher.posted_by = operator.id
     voucher.posted_at = datetime.now()
@@ -331,6 +366,12 @@ def unpost_voucher(db: Session, *, voucher_id: int) -> Voucher:
     if voucher.voided_by_voucher_id:
         raise VoucherError("凭证已被冲销，不能反过账")
     _ensure_period_open(db, voucher.book_id, voucher.period)
+    if voucher.reverses_voucher_id:
+        original = db.get(Voucher, voucher.reverses_voucher_id)
+        if original is None or original.voided_by_voucher_id != voucher.id:
+            raise VoucherError("冲销关联异常，不能反过账")
+        original.status = 'posted'
+        original.voided_by_voucher_id = None
     voucher.status = "audited"
     voucher.posted_by = None
     voucher.posted_at = None
@@ -345,6 +386,8 @@ def reverse_voucher(db: Session, *, voucher_id: int, operator: User) -> Voucher:
         raise VoucherError("只有已过账凭证可以红字冲销")
     if voucher.voided_by_voucher_id:
         raise VoucherError("凭证已被冲销，不能重复冲销")
+    if db.scalar(select(Voucher.id).where(Voucher.reverses_voucher_id == voucher.id)):
+        raise VoucherError("已存在该凭证的红字冲销，请先处理原红冲草稿")
     _ensure_period_open(db, voucher.book_id, voucher.period)
     prefix = f"冲销{voucher.word}字第{voucher.voucher_no:04d}号："
     lines = [
@@ -354,6 +397,7 @@ def reverse_voucher(db: Session, *, voucher_id: int, operator: User) -> Voucher:
             "debit": -Decimal(str(ln.debit)),
             "credit": -Decimal(str(ln.credit)),
             "contact_id": ln.contact_id,
+            "cf_item": ln.cf_item,
         }
         for ln in voucher.lines
     ]
@@ -366,8 +410,24 @@ def reverse_voucher(db: Session, *, voucher_id: int, operator: User) -> Voucher:
         attachment_count=0,
         source="reverse",
         strict_accounts=False,
+        commit=False,
     )
     red.reverses_voucher_id = voucher.id
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise VoucherError("已存在该凭证的红字冲销")
     db.refresh(red)
     return red
+
+
+def _ensure_originals(db: Session, voucher: Voucher) -> None:
+    if voucher.source != "manual":
+        return
+    from app.ledger.attachment_service import list_attachments, read_attachment_file
+    originals = list_attachments(db, voucher.id)
+    if not originals:
+        raise VoucherError("手工凭证提交前必须上传至少一张原始单据")
+    for original in originals:
+        read_attachment_file(original)

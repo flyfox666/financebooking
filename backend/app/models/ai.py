@@ -19,6 +19,7 @@ class AIDoc(Base):
     warnings_json: Mapped[str] = mapped_column(Text, default="[]")
     layers_json: Mapped[str] = mapped_column(Text, default="[]")
     model_output: Mapped[str] = mapped_column(Text, default="")
+    confirmation_json: Mapped[str] = mapped_column(Text, default="{}")
     voucher_id: Mapped[int | None] = mapped_column(ForeignKey("voucher.id"), default=None)
     status: Mapped[str] = mapped_column(String(16), default="parsed", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

@@ -9,6 +9,10 @@
 import socket
 import threading
 import webbrowser
+import os
+import json
+import uuid
+import urllib.request
 
 HOST = "127.0.0.1"
 PORT = 8000
@@ -22,23 +26,47 @@ def _port_in_use(host: str, port: int) -> bool:
 
 
 def main() -> None:
-    if _port_in_use(HOST, PORT):
-        webbrowser.open(APP_URL)
-        print(f"有数 LedgerAI 已在运行，已为你打开浏览器：{APP_URL}")
-        return
+    from app.core.config import DATA_DIR
+    ident_file = DATA_DIR / '.instance_id'
+    if not ident_file.exists():
+        ident_file.write_text(uuid.uuid4().hex, encoding='utf-8')
+    instance = ident_file.read_text(encoding='utf-8').strip()
+    os.environ['LEDGER_INSTANCE_ID'] = instance
+    port = None
+    for candidate in range(PORT, PORT + 20):
+        if _port_in_use(HOST, candidate):
+            try:
+                with urllib.request.urlopen(f'http://{HOST}:{candidate}/api/health', timeout=1) as response:
+                    health = json.load(response)
+                if health.get('app') == 'LedgerAI' and health.get('instance') == instance:
+                    webbrowser.open(f'http://{HOST}:{candidate}/app')
+                    return
+            except Exception:
+                pass
+        elif port is None:
+            port = candidate
+    if port is None:
+        raise RuntimeError('没有可用端口，请关闭冲突程序后再启动')
+    app_url = f'http://{HOST}:{port}/app'
 
     import uvicorn
     from app.main import app
 
     def _open_browser_later() -> None:
-        threading.Event().wait(2.0)
-        webbrowser.open(APP_URL)
+        for _ in range(60):
+            try:
+                with urllib.request.urlopen(f'http://{HOST}:{port}/api/health', timeout=1) as response:
+                    if json.load(response).get('instance') == instance:
+                        webbrowser.open(app_url)
+                        return
+            except Exception:
+                threading.Event().wait(0.5)
 
     threading.Thread(target=_open_browser_later, daemon=True).start()
-    print(f"有数 LedgerAI 正在启动，稍后将自动打开浏览器：{APP_URL}")
+    print(f"有数 LedgerAI 正在启动：{app_url}；数据目录：{DATA_DIR.resolve()}")
     print("首次启动会自动初始化数据目录与管理员账号（admin / admin123456）。")
     print("提示：关闭本窗口即退出服务。数据保存在系统用户目录，重装/升级不丢失。")
-    uvicorn.run(app, host=HOST, port=PORT, log_level="info")
+    uvicorn.run(app, host=HOST, port=port, log_level="info")
 
 
 if __name__ == "__main__":

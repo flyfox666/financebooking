@@ -3,7 +3,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, require_book_access
+from app.api.deps import get_current_user, require_book_access, require_bookkeeper
 from app.core.database import get_db
 from app.ledger import attachment_service
 from app.ledger.exceptions import LedgerError
@@ -28,9 +28,10 @@ async def upload_attachment(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    require_bookkeeper(user)
     voucher = _load_voucher_or_404(db, voucher_id)
     require_book_access(voucher.book_id, db=db, user=user)
-    content = await file.read()
+    content = await file.read(attachment_service.MAX_FILE_SIZE + 1)
     try:
         return attachment_service.save_attachment(
             db,
@@ -71,8 +72,8 @@ def download_attachment(
     quoted = quote(attachment.original_filename)
     return Response(
         content=content,
-        media_type=attachment.content_type,
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quoted}"},
+        media_type=attachment.content_type if attachment.content_type in ('application/pdf','image/png','image/jpeg','image/webp','text/plain') else 'application/octet-stream',
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quoted}", 'X-Content-Type-Options':'nosniff'},
     )
 
 
@@ -83,9 +84,10 @@ def delete_attachment(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    require_bookkeeper(user)
     voucher = _load_voucher_or_404(db, voucher_id)
     require_book_access(voucher.book_id, db=db, user=user)
     try:
-        attachment_service.delete_attachment(db, voucher=voucher, attachment_id=attachment_id)
+        attachment_service.delete_attachment(db, voucher=voucher, attachment_id=attachment_id, operator_id=user.id)
     except LedgerError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

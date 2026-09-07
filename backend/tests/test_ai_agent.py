@@ -29,8 +29,7 @@ VOUCHER_JSON = json.dumps({
     "voucher": {
         "voucher_date": "2026-08-05",
         "lines": [
-            {"summary": "云服务器费", "account_code": "5401", "debit": "8396.04", "credit": "0"},
-            {"summary": "税额", "account_code": "2221", "debit": "83.96", "credit": "0"},
+            {"summary": "云服务器费", "account_code": "5401", "debit": "8480.00", "credit": "0"},
             {"summary": "银行付款", "account_code": "1002", "debit": "0", "credit": "8480.00"},
         ],
     },
@@ -52,7 +51,7 @@ def test_agent_tool_then_voucher(db_session, book, monkeypatch, client, auth_hea
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["voucher_saved"] is True
-    assert data["voucher"]["lines"][0]["debit"] == "8396.04"
+    assert data["voucher"]["lines"][0]["debit"] == "8480.00"
     assert data["trace"][0]["tool"] == "find_or_create_contact"
     assert data["stopped_by_ask_user"] is False
 

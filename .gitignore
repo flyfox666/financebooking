@@ -16,6 +16,9 @@ backend/data/
 .env
 *.env
 !.env.example
+.model_key
+.secret_key
+.instance_id
 
 # 生成的分享包
 .trae-html-share-packages/

@@ -22,7 +22,8 @@ def test_suggest_success(db_session, book, monkeypatch):
         doc_type="invoice",
         fields={"amount_total": "11300.00", "status": "normal"},
     )
-    assert result["confidence"] == 0.9
+    assert result["confidence"] is None
+    assert result["validation_status"] == "checks_passed"
     assert result["voucher"]["lines"][0]["account_code"] == "1122"
     assert result["warnings"] == []
 
@@ -38,7 +39,8 @@ def test_suggest_amount_mismatch_flags_warning(db_session, book, monkeypatch):
         doc_type="invoice",
         fields={"amount_total": "99999.00", "status": "normal"},
     )
-    assert result["confidence"] == 0.6
+    assert result["confidence"] is None
+    assert result["validation_status"] == "needs_review"
     assert any("不一致" in warning for warning in result["warnings"])
 
 
@@ -126,7 +128,7 @@ def _invoice_doc(db_session, book, fields, source_kind="pdf", note=None):
 def _confirm(db_session, doc, mama_user):
     return confirm_suggestion(
         db_session, doc_id=doc.id, voucher_date="2026-08-05",
-        lines=G8_LINES, operator_id=mama_user.id,
+        lines=[dict(line, debit=str(-Decimal(line["debit"])), credit=str(-Decimal(line["credit"]))) for line in G8_LINES] if json.loads(doc.fields_json).get("status") == "red" else G8_LINES, operator_id=mama_user.id,
     )
 
 
@@ -149,7 +151,7 @@ def test_link_invoice_existing_no(db_session, book, mama_user):
 
 
 def test_link_invoice_creates_from_pdf_fields(db_session, book, mama_user):
-    """台账无此号 + PDF 解析 → 自动补录；购方税号=账套 → 判定为销项。"""
+    """台账无此号 + PDF 解析 → 自动补录；购方税号=账套 → 判定为进项。"""
     fields = {
         "invoice_no": "87654321", "invoice_date": "2026-08-02",
         "buyer_tax_no": book.tax_no, "buyer_name": book.name,
@@ -163,7 +165,7 @@ def test_link_invoice_creates_from_pdf_fields(db_session, book, mama_user):
         select(Invoice).where(Invoice.book_id == book.id, Invoice.invoice_no == "87654321")
     )
     assert created is not None
-    assert created.kind == "sales"
+    assert created.kind == "purchase"
     assert created.voucher_id == voucher.id
     assert created.amount_total == Decimal("100.00")
 
@@ -182,7 +184,7 @@ def test_link_invoice_red_negative(db_session, book, mama_user):
     """红字发票补录：金额取负数、status=red。"""
     fields = {
         "invoice_no": "11112222", "invoice_date": "2026-08-03",
-        "amount_total": "100.00", "status": "红字",
+        "amount_total": "-100.00", "status": "red", "buyer_tax_no": book.tax_no,
     }
     doc = _invoice_doc(db_session, book, fields)
     _confirm(db_session, doc, mama_user)

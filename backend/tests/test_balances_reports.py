@@ -96,6 +96,8 @@ def _make_unposted(db_session, book, mama_user, auditor_user, account_code, tota
         ],
         operator_id=mama_user.id,
     )
+    from tests.conftest import attach_original
+    attach_original(db_session, voucher, mama_user.id)
     if status in ("submitted", "audited"):
         voucher_service.submit_voucher(db_session, voucher_id=voucher.id, operator_id=mama_user.id)
     if status == "audited":

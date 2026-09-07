@@ -36,6 +36,12 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+def require_bookkeeper(user: User = Depends(get_current_user)) -> User:
+    if user.role not in ("bookkeeper", "admin"):
+        raise HTTPException(status_code=403, detail="审核岗不能制单或修改凭证，请退回制单岗处理")
+    return user
+
+
 def require_auditor_or_admin(user: User = Depends(get_current_user)) -> User:
     if user.role not in ("auditor", "admin"):
         raise HTTPException(

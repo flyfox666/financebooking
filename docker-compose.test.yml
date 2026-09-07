@@ -1,0 +1,41 @@
+name: ledgerai-codex-test
+
+services:
+  backend:
+    build: ./backend
+    image: ledgerai-codex-test:local
+    container_name: ledgerai-codex-test
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:18000:8000"
+    environment:
+      LEDGER_DATA_DIR: /data
+      DATABASE_URL: sqlite:////data/ledger.db
+      ATTACHMENTS_DIR: /data/attachments
+      BACKUP_DIR: /data/backups
+      SECRET_KEY: local-isolated-test-only-not-for-production
+      LLM_API_KEY: ""
+    volumes:
+      - test-data:/data
+
+  tests:
+    profiles: ["tests"]
+    healthcheck:
+      disable: true
+    image: ledgerai-codex-test:local
+    working_dir: /app
+    environment:
+      PYTHONPATH: /app
+      LEDGER_DATA_DIR: /tmp/ledgerai-tests
+      DATABASE_URL: sqlite://
+      ATTACHMENTS_DIR: /tmp/ledgerai-tests/attachments
+      BACKUP_DIR: /tmp/ledgerai-tests/backups
+      LLM_API_KEY: ""
+    volumes:
+      - ./backend/tests:/app/tests:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "pip install --no-cache-dir 'pytest>=8.0' 'fpdf2>=2.7' 'qrcode>=7.4' && python -m pytest tests -q -p no:cacheprovider"
+
+volumes:
+  test-data:

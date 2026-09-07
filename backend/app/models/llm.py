@@ -4,6 +4,7 @@ from sqlalchemy import Boolean, DateTime, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.core.model_secrets import EncryptedCredential
 
 
 class LLMProvider(Base):
@@ -14,7 +15,7 @@ class LLMProvider(Base):
     name: Mapped[str] = mapped_column(String(64))
     protocol: Mapped[str] = mapped_column(String(16), default="openai")
     base_url: Mapped[str] = mapped_column(String(200))
-    api_key: Mapped[str] = mapped_column(String(400))
+    api_key: Mapped[str] = mapped_column(EncryptedCredential())
     model: Mapped[str] = mapped_column(String(64))
     vision_model: Mapped[str | None] = mapped_column(String(64), default=None)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)

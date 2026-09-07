@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, require_auditor_or_admin, require_book_access
+from app.api.deps import get_current_user, require_auditor_or_admin, require_book_access, require_bookkeeper
 from app.core.database import get_db
 from app.ledger import close_service, voucher_service
 from app.ledger.exceptions import LedgerError
@@ -42,10 +42,17 @@ def batch_voucher_actions(
     if body.action in ("reject", "audit", "post", "unpost") and user.role not in ("auditor", "admin"):
         raise HTTPException(status_code=403, detail="需要审核或管理员权限")
     fn = _BATCH_ACTIONS[body.action]
+    if body.action in ("submit", "delete"):
+        require_bookkeeper(user)
     ok_ids: list[int] = []
     failed: list[dict] = []
     for vid in body.ids:
         try:
+            voucher = voucher_service.get_voucher(db, vid)
+            if voucher.book_id != book_id:
+                failed.append({"id": vid, "error": "凭证不属于当前账套"})
+                continue
+            _check_voucher_access(db, user, vid)
             fn(db, vid, user)
             ok_ids.append(vid)
         except LedgerError as exc:
@@ -60,6 +67,9 @@ def create_voucher(
     db: Session = Depends(get_db),
     user: User = Depends(require_book_access),
 ):
+    require_bookkeeper(user)
+    if body.source != "manual":
+        raise HTTPException(status_code=400, detail="此接口仅接受手工凭证，AI 和系统凭证须从对应流程生成")
     try:
         return voucher_service.create_voucher(
             db,
@@ -106,6 +116,7 @@ def update_voucher(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    require_bookkeeper(user)
     _check_voucher_access(db, user, voucher_id)
     try:
         return voucher_service.update_voucher(
@@ -114,6 +125,7 @@ def update_voucher(
             voucher_date=body.voucher_date,
             attachment_count=body.attachment_count,
             lines=[line.model_dump() for line in body.lines] if body.lines is not None else None,
+            operator_id=user.id,
         )
     except LedgerError as exc:
         raise _bad_request(exc)
@@ -125,6 +137,7 @@ def delete_voucher(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    require_bookkeeper(user)
     _check_voucher_access(db, user, voucher_id)
     try:
         voucher_service.delete_voucher(db, voucher_id=voucher_id)
@@ -138,6 +151,7 @@ def submit_voucher(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    require_bookkeeper(user)
     _check_voucher_access(db, user, voucher_id)
     try:
         return voucher_service.submit_voucher(db, voucher_id=voucher_id, operator_id=user.id)

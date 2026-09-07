@@ -19,3 +19,6 @@ class ConfirmIn(BaseModel):
     doc_id: int
     voucher_date: date
     lines: list[dict] = Field(min_length=2)
+    invoice_kind: str | None = None
+    risk_fingerprint: str | None = None
+    risk_reason: str = Field(default="", max_length=500)

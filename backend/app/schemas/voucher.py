@@ -15,6 +15,7 @@ class VoucherLineIn(BaseModel):
     debit: Decimal = Decimal("0")
     credit: Decimal = Decimal("0")
     contact_id: int | None = None
+    cf_item: str | None = None
 
 
 class VoucherCreateIn(BaseModel):

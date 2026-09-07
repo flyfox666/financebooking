@@ -92,7 +92,7 @@ def _flows(db: Session, book_id: int, period_from: str, period_to: str) -> dict:
     for lines in grouped.values():
         cash_lines = [(c, a, cf) for c, a, cf in lines if c[:4] in CASH_ACCOUNTS]
         cash_net = sum((a for _, a, _ in cash_lines), ZERO)
-        if cash_net == 0:
+        if cash_net == 0 and not any(c[:4] not in CASH_ACCOUNTS for c, _, _ in lines):
             continue
         # 优先采用行级现金流量标注（支持一张凭证拆进多个流量项目）
         tagged_total = ZERO
@@ -108,7 +108,7 @@ def _flows(db: Session, book_id: int, period_from: str, period_to: str) -> dict:
                 continue
             main_code, _ = max(others, key=lambda item: abs(item[1]))
             mapping = INFLOW_MAP if remainder > 0 else OUTFLOW_MAP
-            item = mapping.get(main_code, "other_in" if remainder > 0 else "other_out")
+            item = mapping.get(main_code, mapping.get(main_code[:4], "other_in" if remainder > 0 else "other_out"))
             buckets[item] = buckets.get(item, ZERO) + remainder
     return buckets
 
@@ -123,7 +123,7 @@ def _section(name: str, inflow_items: list[str], outflow_items: list[str], flows
         rows.append({"name": ITEM_LABELS[item], "value": fmt_amount(value), "bold": False})
     rows.append({"name": "经营活动现金流入小计" if "经营" in name else f"{name}现金流入小计", "value": fmt_amount(inflow_total), "bold": True})
     for item in outflow_items:
-        value = abs(flows.get(item, ZERO))
+        value = -flows.get(item, ZERO)
         outflow_total += value
         rows.append({"name": ITEM_LABELS[item], "value": fmt_amount(value), "bold": False})
     rows.append({"name": "经营活动现金流出小计" if "经营" in name else f"{name}现金流出小计", "value": fmt_amount(outflow_total), "bold": True})
