@@ -3,7 +3,7 @@
 适用：Windows 10/11 x64；预发布测试版，请先使用测试账套。
 
 1. 安装与启动
-安装版运行 YouShuLedgerAI-setup-*.exe；绿色版先完整解压 ZIP，
+安装版运行 YouShuLedgerAI-setup-*.exe；便携版先完整解压 ZIP，
 再运行 YouShuLedgerAI.exe，不能只拷走 exe 或在 ZIP 内直接运行。
 无需安装 Python 或 Docker。保留后台控制台窗口，关闭它即退出服务。
 浏览器通常打开 http://127.0.0.1:8000/app；端口被占用会在8000—8019
@@ -28,7 +28,7 @@ ledger.db、attachments、待处理文件、backups、.secret_key、.model_key�
 先下载完整备份并保存旧版本，再退出旧程序并安装/解压新版本。
 新版本沿用原数据目录，并可能自动迁移数据库。
 数据库迁移后不要直接启动旧程序；回退需恢复升级前的完整备份。
-绿色版建议解压到新文件夹，避免覆盖时残留旧依赖。
+便携版建议解压到新文件夹，避免覆盖时残留旧依赖。
 
 5. 多人访问
 Windows包为本机版；NAS/局域网部署请参照仓库README的独立说明。

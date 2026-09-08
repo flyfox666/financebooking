@@ -2,7 +2,7 @@
 """有数 LedgerAI 打包配置（PyInstaller，onedir 模式）。
 
 onedir（文件夹）而非 onefile：启动快、方便 Inno Setup 装目录、
-便于定位打包遗留问题；绿色压缩包直接 zip 该 dist 文件夹即可。
+便于定位打包遗留问题；便携压缩包直接 zip 该 dist 文件夹即可。
 
 用法：build\venv\Scripts\pyinstaller YouShuLedgerAI.spec
 产物：dist\YouShuLedgerAI\YouShuLedgerAI.exe
