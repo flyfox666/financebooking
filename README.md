@@ -187,23 +187,61 @@ admin 可切换所有账套（天然全权限）；制单/审核账号只能切�
 科目余额表顶部徽章区 / 报表模块 → 映射体检页顶部：方向异常、未分配利润↔净利润、
 货币资金↔现金流、跨期衔接四项，✅/❌ 逐项显示，异常点开明细直接定位科目。
 
-## 七、快速开始
+## 七、下载、部署与升级（pre-test）
+
+当前为 **pre-test 预发布测试版**，软件发布版本为 `v0.2.0-pretest.1`；上方 `v2.6` 是README内容修订号，两者不是同一种版本号。下载请到 [GitHub Releases](https://github.com/flyfox666/financebooking/releases)。
+
+| 使用方式 | 前置条件 | 启动与地址 | 数据位置 |
+|---|---|---|---|
+| Windows安装版 | Windows 10/11 x64 | 运行 `YouShuLedgerAI-setup-*.exe` 安装，再从快捷方式启动 | `%LOCALAPPDATA%\有数LedgerAI\data` |
+| Windows绿色版 | Windows 10/11 x64 | 完整解压 `YouShuLedgerAI-portable-*.zip`，运行其中的 `YouShuLedgerAI.exe` | 同上，数据不在程序文件夹 |
+| 本机隔离Docker测试 | Git、Docker Desktop/Engine及Compose插件 | 下方显式使用 `docker-compose.test.yml`；`127.0.0.1:18000/app` | 独立命名卷 `ledgerai-codex-test_test-data` |
+| NAS/局域网Docker | 支持Docker的NAS/服务器 | 独立目录使用 `docker-compose.yml`；`服务器IP:8000/app` | 该部署目录的 `data/` |
+
+### A. 下载Windows测试版
+
+安装版和绿色版均内置Python及依赖，无需安装Docker或Python。绿色版必须连同 `_internal` 完整解压，不能只运行ZIP中的exe。首次启动会打开浏览器，默认本机8000端口被占用时在8000—8019中选择空闲端口，以控制台显示的地址为准。保留控制台窗口，关闭即停止服务。
+
+首次空库自动创建 `admin / admin123456`。登录后在“用户管理”中修改密码，创建自己的账套，再到“模型设置”填写自己的API Key；下载包不含作者的Key或企业数据。Windows包仅绑定本机地址，未签名；下载后可用PowerShell的 `Get-FileHash 文件路径 -Algorithm SHA256` 与Release的 `SHA256SUMS.txt` 对照。
+
+### B. 本机隔离Docker测试（本项目开发采用此方式）
 
 ```bash
-docker compose build backend
-docker compose up -d backend
-# 浏览器访问 http://127.0.0.1:8000/app（注意用 127.0.0.1，localhost 的 IPv6 解析会失败）
-
-# 首次初始化：建管理员 + 默认账套（66 科目/报表模板/税务参数自动预置）
-docker compose exec backend python scripts/init_dev_db.py \
-  --admin-username admin --admin-password 你的密码 \
-  --book-name 你的公司全称 --start-period 2026-08
+git clone https://github.com/flyfox666/financebooking.git
+cd financebooking
+docker compose -f docker-compose.test.yml build backend
+docker compose -f docker-compose.test.yml up -d backend
+docker compose -f docker-compose.test.yml ps
 ```
 
-- 数据目录：`data/`（SQLite 库 + 附件 + 每日备份），容器重建数据不丢
-- **模型服务**：登录后右上角「设置」→ 添加 LLM provider（密钥加密存库，支持多 provider 切换、
-  连通性测试）；`.env` 的 `LLM_*` 变量仅作为首次启动的自动种子（可选）
-- NAS/家庭服务器部署详见 [NAS部署操作文档.md](NAS部署操作文档.md)
+访问 `http://127.0.0.1:18000/app`，空库使用默认管理员登录后修改密码并建账套。这份Compose内置仅供本地测试的配置，不读取根目录 `.env`，无需复制模型Key。停止服务用 `docker compose -f docker-compose.test.yml stop backend`。重建镜像保留数据卷；不要用 `down -v`，它会删除卷中的测试数据。
+
+### C. NAS或局域网部署（另建目录，不在当前隔离测试目录运行）
+
+安装Git、Docker及Compose插件，在独立目录克隆仓库。复制 `.env.example` 为 `.env`，把 `SECRET_KEY` 换成随机长字符串，LLM Key可留空，后续在网页配置。
+
+```bash
+docker compose -f docker-compose.yml build backend
+docker compose -f docker-compose.yml up -d backend
+docker compose -f docker-compose.yml ps
+```
+
+访问 `http://服务器内网IP:8000/app`。默认Compose的8000端口对宿主网络开放，只用于受控内网；本项目测试不执行这组命令。首次管理员登录和建账套同上，无须额外运行旧初始化脚本。完整步骤见 [NAS部署操作文档.md](NAS部署操作文档.md)。
+
+### 升级、备份与Release约定
+
+- 升级前下载并私有保存“完整备份”，退出Windows旧程序或停止对应Docker服务，再替换程序/更新源码并重建。启动会自动迁移数据库；回退时应恢复升级前备份，不能直接用旧程序打开迁移后的库。
+- Windows卸载保留用户数据；绿色版建议解压到新目录。Docker重建不会删除绑定目录或命名卷，但删除卷会丢数据。
+- Release提供版本明确的安装版、绿色ZIP、SHA256清单及构建依赖记录；GitHub自动生成的“Source code” ZIP只是源码，不是可双击运行的绿色版。旧 `v0.1.0` 本地包缺少9月7日修复，不作为本次附件。
+- 新版本使用新的 `vX.Y.Z-pretest.N` 标签，附变动说明、验收结果和已知限制，不覆盖旧版本附件。源文件在Git中，`build/`、`dist/` 的二进制产物仅作为经过验收的Release附件。
+- 本地重建：以Python 3.12建立 `build/release-venv`，安装 `backend/requirements.txt` 和 `pyinstaller`，另备Inno Setup（含简体中文语言文件），运行 `installer/build-release.ps1 -Version 0.2.0-pretest.2`。可通过 `-Python`、`-Compiler` 指定工具路径。脚本生成包后仍须空库启动、登录/迁移、密钥检查，再创建预发布Release；它不会自动上传。
+- **程序包不等于备份包**：系统“完整备份”含数据库、原件、待处理文件和 `.model_key` 等私密内容，不能上传GitHub或公开Release。密钥在运行时加密存库；`.env`、`.env.*`、数据目录与密钥文件被忽略，仅 `.env.example` 模板公开。忽略规则不能撤回历史提交，发布前仍需扫描历史与附件。
+
+### 哪些文档已上传，哪些只在本机
+
+已上传：README、CHANGELOG、开发进度与交接、测试覆盖计划、NAS部署操作文档、AGENTS、架构SVG、`docs/`设计说明、`installer/使用前必读.txt`与打包源码，以及历史 `.trae/rules/`。以仓库文件列表为准。
+
+本机忽略：`dist/`旧安装包/绿色包，`build/`工具链和验收日志，`.trae-html-share-packages/`设计网页分享ZIP，`social/`发布素材，根目录截图和票据PDF，依赖/缓存内的说明文档；这些不属于遗漏的项目使用说明。`.env`、数据库、原件与备份则是必须保留在本机的私有运行数据。
 
 ## 八、文档同步约定
 

@@ -1,6 +1,6 @@
 # 有数 LedgerAI · NAS 部署操作文档
 
-> 适用版本：当前 main 分支（M1–M6 全量功能：AI 记账 / 勾稽校验 / 报表引擎 / 税务）
+> 适用版本：v0.2.0-pretest.1 / 当前源码；仅用于另建目录的NAS部署。当前本机开发使用docker-compose.test.yml和18000端口，见README。
 > 日常使用入口：主界面 `http://NAS内网IP:8000/app`（接口调试页 /docs 仅开发用）
 > 部署架构：单后端容器 + NAS 数据卷（SQLite 数据库 / 电子附件 / 自动备份）
 > 适用 NAS：群晖 / 威联通 / 极空间 / 绿联等支持 Docker（Container Manager）的 x86_64 机型
@@ -16,13 +16,13 @@ NAS (x86_64, 局域网)
         └── 挂载卷  /data  ←→  NAS 目录 /volume1/docker/ledger/data
             ├── ledger.db          账套数据库（SQLite，唯一账本）
             ├── attachments/       凭证电子附件（按账套/期间分目录）
-            └── backups/           每日凌晨3点自动备份（gzip，保留30天）
+            └── backups/           每日凌晨3点完整ZIP备份，保留30天
 ```
 
 要点：
-- **账本就是一个 SQLite 文件**，备份 = 复制文件；容器删除重建不影响数据；
-- 数据库结构升级由 **Alembic 在容器启动时自动执行**，升级版本 = 重启容器；
-- 前端容器待前端开发完成后加入 compose（届时只增不改）。
+- 数据库、原件、待处理文件和模型解密文件共同构成可恢复数据，不能只备份数据库。
+- 数据库结构升级由 **Alembic 在容器启动时自动执行**；源码更新须先重建镜像，单纯重启仍会运行旧代码。
+- 前端由同一后端容器提供，不需要单独的前端容器。
 
 ---
 
@@ -41,7 +41,7 @@ NAS (x86_64, 局域网)
 
 ### 第 1 步：拷贝项目到 NAS
 
-把整个 `financebooking` 文件夹上传到 NAS，例如：
+通过Git克隆或复制已跟踪源码到NAS，不复制本地 `.env`、`data/`、`build/`、`dist/` 和私有备份。例如：
 
 ```text
 /volume1/docker/ledger/
@@ -94,19 +94,11 @@ docker compose logs -f   # 观察启动日志，Ctrl+C 退出查看
 
 ### 第 4 步：初始化管理员与账套
 
-```bash
-docker compose exec backend python scripts/init_dev_db.py \
-  --admin-username admin \
-  --admin-password 你的管理员密码 \
-  --book-name 你的公司全称 \
-  --start-period 2026-08
-```
-
-脚本会自动：建表（Alembic 迁移已在启动时执行）→ 创建管理员 → 建账套并预置 66 个会计科目与报表模板、税务参数。
+空库首次启动自动创建管理员 `admin / admin123456`。登录后立即在“用户管理”修改密码，再按页面引导建账套并核对启用期间和期初余额。不要把旧初始化脚本当作修改默认管理员密码的方法。
 
 ### 第 5 步：配置模型服务（使用 AI 记账才需要）
 
-登录主界面 → 右上角齿轮「设置」→ 添加 provider（OpenAI 兼容 / 火山 / 通义等），
+登录主界面 → 左侧「模型设置」→ 添加 provider（OpenAI 兼容 / 火山 / 通义等），
 填入 API Key 后点「测试连通」→ 设为默认。**密钥加密存储在数据库**，不落 .env、不进代码仓库。
 
 > `.env` 中的 `LLM_API_KEY` 等变量是可选的「首次启动种子」：容器第一次启动且库中无 provider 时
@@ -122,7 +114,7 @@ http://NAS内网IP:8000/docs        ← 接口调试页（仅开发/测试用）
 ```
 
 主界面登录后依次验证：右侧「本期概要」有数据、凭证/报表/发票三个 Tab 正常打开；
-如需 AI 记账，先到右上角「设置」页添加 LLM provider（见下节）。
+如需 AI 记账，先到左侧「模型设置」页添加 LLM provider（见下节）。
 
 ### 第 7 步：确认数据落在 NAS 上
 
@@ -153,7 +145,7 @@ data/
 
 ```bash
 # 1. 备份当前数据（保险）
-docker compose exec backend python -c "from app.core.backup import run_backup_now; print(run_backup_now())"
+docker compose exec backend python -c "from app.core.backup import run_full_backup; print(run_full_backup())"
 
 # 2. 用新版代码覆盖 backend/ 目录与 docker-compose.yml
 # 3. 重建并启动（Alembic 自动完成表结构迁移）
@@ -166,39 +158,25 @@ docker compose up -d --build
 
 ## 五、备份与恢复
 
-### 自动备份
+### 自动与手动完整备份
 
-- 每天凌晨 03:00 自动执行（容器内置定时任务）；
-- 采用 SQLite 安全快照 API（备份时写入不受影响）→ gzip 压缩；
-- 文件名：`backups/ledger-YYYY-MM-DD_HHMMSS.db.gz`，自动保留最近 30 天。
-
-### 手动立即备份
+- 服务运行时每天凌晨03:00执行，启动时补做；成功备份保留30天。
+- 生成 `backups/ledger-full-时间戳.zip`，含SQLite安全快照、引用的电子原件/待处理文件、`.model_key`及校验清单；不是旧版只有数据库的gzip。
+- 管理员可在主界面“完整备份”下载，或在此NAS部署目录运行：
 
 ```bash
-docker compose exec backend python -c "from app.core.backup import run_backup_now; print(run_backup_now())"
+docker compose -f docker-compose.yml exec backend python -c "from app.core.backup import run_full_backup; print(run_full_backup())"
 ```
 
-### 恢复（两种场景）
+完整备份含可用于恢复模型凭据的文件，只保存到受控的私有备份位置；不要上传GitHub或Release。NAS部署的 `.env` 含登录签名配置，需另行私有保存，不包含在应用完整ZIP中。
 
-**场景 A：整库恢复到某个备份点**
+### 恢复与回退
 
-```bash
-docker compose down
-cd /volume1/docker/ledger/data
-cp ledger.db ledger.db.broken            # 保留现场
-gzip -dc backups/ledger-2026-08-31_054202.db.gz > ledger.db
-cd .. && docker compose up -d
-```
+先停止对应服务，保留当前整个数据目录及升级前程序版本。维护函数 `app.core.backup.restore_full_backup` 只接受新的空目标目录，校验路径、SHA256和数据库完整性，禁止直接覆盖现有账务库。恢复后还须核对最终数据挂载位置、待处理单据路径、模型凭据和附件，再切换运行。当前没有面向普通用户的一键恢复界面，不要沿用旧文档的“只解压ledger.db覆盖现库”方式。
 
-**场景 B：只验证备份文件好不好（不覆盖现库）**
-
-```bash
-docker compose exec backend python scripts/restore_check.py data/backups/ledger-2026-08-31_054202.db.gz
-# 输出：账套名 / 科目数 / 报表模板行数 / 管理员账号 → 与预期一致即备份有效
-```
+若仅备份整个NAS数据目录，应先停止服务再复制；原目录及备份不能被两个实例同时写入。数据已迁移时，回退须恢复升级前完整备份，不应直接用旧镜像读取新数据库。
 
 ---
-
 ## 六、故障排查
 
 | 现象 | 排查 |
@@ -209,7 +187,7 @@ docker compose exec backend python scripts/restore_check.py data/backups/ledger-
 | NAS 上构建失败 | 确认 NAS Docker 版本支持 Compose v2（`docker compose version`）；老版套件用 Container Manager 图形界面导入 |
 | 登录 401 且密钥换过 | SECRET_KEY 变更会导致旧令牌失效，重新登录即可 |
 | 数据库锁死 (database is locked) | SQLite 单写者，正常使用不会出现；若出现多为两个进程直写同一文件，确认只有容器在访问 data 目录 |
-| AI 记账报模型错误 / 无响应 | 主界面「设置」页点 provider 的「测试连通」；多为 Key 失效、余额不足或 base_url 错；勾稽/报表功能不依赖 LLM，不受影响 |
+| AI 记账报模型错误 / 无响应 | 主界面「模型设置」页点 provider 的「测试连通」；多为 Key 失效、余额不足或 base_url 错；勾稽/报表功能不依赖 LLM，不受影响 |
 
 ---
 
@@ -218,7 +196,7 @@ docker compose exec backend python scripts/restore_check.py data/backups/ledger-
 1. **默认只走局域网**：不要在路由器上把 8000 端口映射到公网；
 2. **外网访问需求**：推荐 Tailscale / WireGuard 组网（点对点加密、不开端口），或 NAS 自带反向代理 + HTTPS + 强密码；
 3. **账号**：首次初始化后立即改掉默认密码；制单（bookkeeper）与审核（auditor）使用不同账号，系统强制制审分离；
-4. **密钥**：模型服务 API Key 在主界面「设置」页配置（加密存数据库）；`.env` 不进代码仓库，
+4. **密钥**：模型服务 API Key 在主界面「模型设置」页配置（加密存数据库）；`.env` 不进代码仓库，
    其中的 `LLM_*` 变量仅作首启种子，长期不用的可删；
 5. **第二重备份**：NAS 自带快照或云同步 `/volume1/docker/ledger/data`，防止 NAS 盘故障。
 

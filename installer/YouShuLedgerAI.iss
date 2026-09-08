@@ -12,7 +12,12 @@
 
 #define MyAppName "有数 LedgerAI"
 #define MyAppNameEn "YouShuLedgerAI"
-#define MyAppVersion "0.1.0"
+#ifndef MyAppVersion
+#define MyAppVersion "0.2.0-pretest.1"
+#endif
+#ifndef PayloadDir
+#define PayloadDir "dist\YouShuLedgerAI"
+#endif
 #define MyAppPublisher "有数 LedgerAI"
 #define MyAppExeName "YouShuLedgerAI.exe"
 #define MyAppURL "http://127.0.0.1:8000/app"
@@ -75,7 +80,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 ; PyInstaller 产物整目录（含 _internal 下的解释器、依赖、静态前端、迁移脚本）
-Source: "dist\{#MyAppNameEn}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#PayloadDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 ; 使用说明随程序一起装，便于用户从开始菜单直接打开
 Source: "installer\使用前必读.txt"; DestDir: "{app}"; Flags: ignoreversion
 

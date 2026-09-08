@@ -95,6 +95,12 @@
 
 ## 五、代码与命名规范
 
+### pre-test 发布附件（2026-09-08 用户要求）
+- 当前为预发布测试阶段，功能版本采用 `vX.Y.Z-pretest.N` 标签；新功能版本通过必要验收后，在 GitHub Releases 发布对应安装包、绿色ZIP、SHA256清单和版本说明。README内容修订号与软件版本号分开。
+- `build/`、`dist/` 继续忽略，二进制作为Release附件，不提交进Git；使用 `installer/build-release.ps1` 构建新的版本目录，不冒用旧包代表新源码，不覆盖历史附件。
+- 发布前必须验证打包exe的独立空库启动、迁移与登录，扫描包内无数据库、原件、`.env`、API Key、`.model_key`等私有内容。系统导出的完整备份ZIP绝不能作为公开附件。
+- 未测试的安装向导、升级路径或特定功能需在Release说明中明确，不因编译成功声称全面验收。文档修订本身不要求重发相同二进制。
+
 - 后端 Python：PEP 8，snake_case 变量/函数，PascalCase 类；类型注解 `Mapped[T|None]` + Pydantic schema。
 - 数据库层：SQLAlchemy 2.0 declarative，`mapped_column()`，迁移用 Alembic（手写 upgrade/downgrade 不要 auto-generate 依赖缺失的 env）。
 - 前端：原生 HTML/CSS/JS（无构建步骤、无框架），所有逻辑嵌在 `app.html` 的 `<script>` 中或 `<script src="...">` 外链。查询用 `$=document.querySelector`、`$$=querySelectorAll`（如果有定义），否则标准 DOM API。

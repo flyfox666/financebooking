@@ -15,6 +15,7 @@ backend/data/
 # 密钥与环境配置（只保留 .env.example 模板）
 .env
 *.env
+.env.*
 !.env.example
 .model_key
 .secret_key
