@@ -189,7 +189,9 @@ admin 可切换所有账套（天然全权限）；制单/审核账号只能切�
 
 ## 七、下载、部署与升级（pre-test）
 
-当前为 **pre-test 预发布测试版**，软件发布版本为 `v0.2.0-pretest.1`；上方 `v2.6` 是README内容修订号，两者不是同一种版本号。下载请到 [GitHub Releases](https://github.com/flyfox666/financebooking/releases)。
+当前为 **pre-test 预发布测试版**，软件发布版本为 `v0.2.0-pretest.1`；上方 `v2.6` 是README内容修订号，两者不是同一种版本号。下载请到 [v0.2.0-pretest.1 Release](https://github.com/flyfox666/financebooking/releases/tag/v0.2.0-pretest.1)，后续版本见[全部Releases](https://github.com/flyfox666/financebooking/releases)。
+
+截至2026-09-08，仓库为私有：Release已发布，但下载须登录有本仓库访问权限的GitHub账号；匿名打开404不表示附件不存在。本次没有更改仓库可见性。
 
 | 使用方式 | 前置条件 | 启动与地址 | 数据位置 |
 |---|---|---|---|
