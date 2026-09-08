@@ -4,8 +4,9 @@
 onedir（文件夹）而非 onefile：启动快、方便 Inno Setup 装目录、
 便于定位打包遗留问题；便携压缩包直接 zip 该 dist 文件夹即可。
 
-用法：build\venv\Scripts\pyinstaller YouShuLedgerAI.spec
-产物：dist\YouShuLedgerAI\YouShuLedgerAI.exe
+推荐通过 installer/build-release.ps1 调用，使用 build/release-venv。
+产物：dist/releases/<新版本>/ 下的安装包与便携ZIP。
+旧 build/venv 和 dist/YouShuLedgerAI 已于2026-09-08清理。
 """
 
 a = Analysis(

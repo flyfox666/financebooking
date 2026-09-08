@@ -245,6 +245,8 @@ docker compose -f docker-compose.yml ps
 
 本机忽略：`dist/`旧安装包/便携包，`build/`工具链和验收日志，`.trae-html-share-packages/`设计网页分享ZIP，`social/`发布素材，根目录截图和票据PDF，依赖/缓存内的说明文档；这些不属于遗漏的项目使用说明。`.env`、数据库、原件与备份则是必须保留在本机的私有运行数据。
 
+2026-09-08经用户确认已清理旧依赖、v0.1.0产物、构建缓存和临时验收副本，共约1.58GiB。当前版本的5个发布附件仍保留在 `dist/releases/v0.2.0-pretest.1/`；继续打包所需的 `build/release-venv` 和 `build/tools/inno` 保留。源码、配置、业务数据及远程Release未删除。
+
 ## 八、文档同步约定
 
 - **本 README**：项目门面，阶段/功能/亮点变化时同步更新（版本号 + 日期）

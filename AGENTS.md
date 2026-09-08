@@ -8,7 +8,7 @@
 ## 一、环境铁律（触碰即错）
 
 1. **环境隔离（2026-09-07 用户确认）**：本项目为 `D:\codexproject\financebooking`，旧目录禁令是复制遗留。当前测试统一用 `docker compose -f docker-compose.test.yml`，容器 `ledgerai-codex-test`、端口 18000、独立卷 `ledgerai-codex-test_test-data`。旧容器 `ledgerai-backend` 及 `ledgerai-*-1` 保留，不重建、不复用其财务数据卷。用户已授权仅复用旧环境的模型连接配置与密钥。
-2. **不要用全局 Python 跑服务**：全局 Python 3.13 缺依赖，依赖装在 `backend\.deps`。开发流程统一走 Docker：改代码 → `docker compose -f docker-compose.test.yml build backend && docker compose -f docker-compose.test.yml up -d backend`。
+2. **不要用全局 Python 跑服务**：开发服务与业务测试统一走 Docker。旧 `backend\.deps`、`backend\.venv`、`build\venv` 已于2026-09-08经用户确认清理；Windows打包使用 `build/release-venv`。开发流程：改代码 → `docker compose -f docker-compose.test.yml build backend && docker compose -f docker-compose.test.yml up -d backend`。
 3. **当前测试访问地址**：`http://127.0.0.1:18000/app`。构建和启动须显式带 `-f docker-compose.test.yml`，不要直接执行默认 Compose 文件，它仍指向旧容器名与 8000 端口。
 4. **管理员账号**：admin / admin123456。LLM provider 与密钥在「设置」页配置（gateway 多 provider，加密存储）。
 5. **禁止编造企业数据**：涉及中国企业工商/股权/风险一律走「天眼一下」Skill / 天眼查 MCP，先 `search_companies` 锚定主体再查询。
