@@ -32,4 +32,6 @@ ledger.db、attachments、待处理文件、backups、.secret_key、.model_key�
 
 5. 多人访问
 Windows包为本机版；NAS/局域网部署请参照仓库README的独立说明。
+截至2026-09-30，仓库公开，浏览源码及下载已发布附件无需GitHub登录或仓库授权。
+下载入口与校验清单见README；本说明修订未重发历史安装包或便携ZIP。
 GitHub: https://github.com/flyfox666/financebooking/releases

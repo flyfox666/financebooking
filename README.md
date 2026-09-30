@@ -4,7 +4,7 @@
 > 生成候选凭证 → 人工确认生成草稿 → 另一人审核 → 过账 → 自动汇总账簿、报表与申报数据。
 > **AI 只负责"把业务翻译成凭证"，账目正确性永远不押在模型身上。**
 
-- 文档版本：v2.6（2026-09-07，经营概览与税务核对）· **每次功能更新后须同步本文件**（阶段/功能/亮点章节）
+- 文档版本：v2.6.1（2026-09-30，公开访问与下载说明更正；功能内容截至2026-09-07）· **每次功能更新后须同步本文件**（阶段/功能/亮点章节）
 - 详细开发日志与交接细节见 [开发进度与交接.md](开发进度与交接.md)，AI 行为规范见 [AGENTS.md](AGENTS.md)
 
 ---
@@ -189,9 +189,15 @@ admin 可切换所有账套（天然全权限）；制单/审核账号只能切�
 
 ## 七、下载、部署与升级（pre-test）
 
-当前为 **pre-test 预发布测试版**，软件发布版本为 `v0.2.0-pretest.1`；上方 `v2.6` 是README内容修订号，两者不是同一种版本号。下载请到 [v0.2.0-pretest.1 Release](https://github.com/flyfox666/financebooking/releases/tag/v0.2.0-pretest.1)，后续版本见[全部Releases](https://github.com/flyfox666/financebooking/releases)。
+当前为 **pre-test 预发布测试版**，软件发布版本为 `v0.2.0-pretest.1`；上方 `v2.6.1` 是README内容修订号，两者不是同一种版本号。下载请到 [v0.2.0-pretest.1 Release](https://github.com/flyfox666/financebooking/releases/tag/v0.2.0-pretest.1)，后续版本见[全部Releases](https://github.com/flyfox666/financebooking/releases)。
 
-截至2026-09-08，仓库为私有：Release已发布，但下载须登录有本仓库访问权限的GitHub账号；匿名打开404不表示附件不存在。本次没有更改仓库可见性。
+截至2026-09-30，仓库为**公开仓库**：浏览源码、克隆仓库和下载已发布的Release附件均无需登录GitHub或申请仓库访问权限。9月8日的私有仓库说明已过时；当时的访问验证保留在交接文档与CHANGELOG中。本次仅更正文档，没有更改仓库可见性或权限。
+
+- [Windows便携版 ZIP](https://github.com/flyfox666/financebooking/releases/download/v0.2.0-pretest.1/YouShuLedgerAI-portable-v0.2.0-pretest.1-win-x64.zip)：完整解压后启动，不要仅复制exe。
+- [Windows安装包 EXE](https://github.com/flyfox666/financebooking/releases/download/v0.2.0-pretest.1/YouShuLedgerAI-setup-v0.2.0-pretest.1.exe)。
+- [SHA256校验清单](https://github.com/flyfox666/financebooking/releases/download/v0.2.0-pretest.1/SHA256SUMS.txt)：下载后可用 `Get-FileHash -Algorithm SHA256 <文件路径>` 核对。
+
+2026-09-30使用无认证GitHub API核对公开状态及5项Release附件，并对各附件URL执行跟随重定向的HTTP HEAD请求，均返回200；安装包/便携ZIP的响应长度与API资产大小一致，API摘要与下载的SHA256清单一致。这是链接与元数据检查，未下载二进制重新计算哈希，未运行安装器或重测程序。安装向导与真实旧账升级仍未完成端到端验收，详见交接文档。
 
 | 使用方式 | 前置条件 | 启动与地址 | 数据位置 |
 |---|---|---|---|
